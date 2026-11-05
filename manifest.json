@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "An Tự Duyên Auto Task",
+  "version": "2.0.0",
+  "description": "Tự động di chuyển đúng ngữ cảnh, thực hiện đầy đủ chuỗi nhiệm vụ và nhận thưởng công đức trên An Tự Duyên (didenchua.online).",
+  "permissions": [],
+  "host_permissions": [
+    "https://didenchua.online/*",
+    "https://www.didenchua.online/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://didenchua.online/*",
+        "https://www.didenchua.online/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "style.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
