@@ -1652,12 +1652,26 @@
     for (const t of ALL_TASKS) {
       const el = $(`#atd-panel [data-task="${t.id}"]`);
       if (!el) continue;
+      const isDone = Boolean(t.once && doneOnce.has(t.id));
       el.classList.toggle("on", enabledTasks.has(t.id));
-      el.classList.toggle("done", doneOnce.has(t.id));
+      el.classList.toggle("done", isDone);
+      el.title = isDone
+        ? `${t.label}: Đã xong hôm nay (Tự động bỏ qua khi chạy Auto. Chuột phải để đặt lại nếu muốn chạy lại)`
+        : `${t.label}: ${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}`;
     }
     const countEl = $("#atd-task-count");
     if (countEl) {
-      countEl.textContent = `(${enabledTasks.size}/${ALL_TASKS.length})`;
+      const activeCount = ALL_TASKS.filter(
+        (t) => enabledTasks.has(t.id) && !(t.once && doneOnce.has(t.id))
+      ).length;
+      const doneCount = ALL_TASKS.filter(
+        (t) => enabledTasks.has(t.id) && t.once && doneOnce.has(t.id)
+      ).length;
+      if (doneCount > 0) {
+        countEl.textContent = `(${activeCount} chờ chạy · ${doneCount} xong)`;
+      } else {
+        countEl.textContent = `(${enabledTasks.size}/${ALL_TASKS.length})`;
+      }
     }
     updateTodayStatsUI();
   }
@@ -1666,16 +1680,23 @@
     let cycle = 1;
     try {
       while (running && myRun === runId) {
+        const skipped = ALL_TASKS.filter(
+          (t) => enabledTasks.has(t.id) && t.once && doneOnce.has(t.id)
+        );
         const activeList = ALL_TASKS.filter(
-          (t) => enabledTasks.has(t.id) && !(cycle > 1 && t.once && doneOnce.has(t.id))
+          (t) => enabledTasks.has(t.id) && !(t.once && doneOnce.has(t.id))
         );
 
         if (activeList.length === 0) {
-          stop("Đã hoàn tất toàn bộ tác vụ đã chọn.");
+          stop("Tất cả tác vụ đã chọn đều đã hoàn thành hôm nay.");
           return;
         }
 
-        log(`=== Bắt đầu chu kỳ #${cycle} (${activeList.length} tác vụ) ===`, "info");
+        if (cycle === 1 && skipped.length > 0) {
+          log(`Tự động bỏ qua ${skipped.length} tác vụ đã hoàn thành: ${skipped.map((t) => t.label).join(", ")}.`, "info");
+        }
+
+        log(`=== Bắt đầu chu kỳ #${cycle} (${activeList.length} tác vụ cần làm) ===`, "info");
 
         for (let i = 0; i < activeList.length; i++) {
           checkRun(myRun);
@@ -2066,6 +2087,23 @@
         if (enabledTasks.has(id)) enabledTasks.delete(id);
         else enabledTasks.add(id);
         updateTagUI();
+      });
+
+      // Chuột phải vào thẻ đã xong để đặt lại trạng thái nếu muốn chạy lại
+      btn.addEventListener("contextmenu", (e) => {
+        const id = btn.dataset.task;
+        if (doneOnce.has(id)) {
+          e.preventDefault();
+          doneOnce.delete(id);
+          if (id === "quet") serverChores.quet = false;
+          if (id === "ca") serverChores.ca = false;
+          if (id === "lamp") serverChores.den = false;
+          if (id === "thoikhoa") serverChores.tk = false;
+          saveServerChores();
+          saveDoneOnce();
+          updateTagUI();
+          log(`Đã đặt lại trạng thái "${btn.textContent.trim()}" để chạy lại hôm nay.`, "info");
+        }
       });
     });
 
