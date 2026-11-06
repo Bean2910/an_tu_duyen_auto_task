@@ -2,11 +2,127 @@
   if (window.__ATD_AUTO_TASK_LOADED__) return;
   window.__ATD_AUTO_TASK_LOADED__ = true;
 
+  // --- HỆ THỐNG ĐỒNG BỘ LẠY ĐỒNG TÂM & BẮT NHỊP WEBSOCKET SWARM ---
+  const TAB_ID = Math.random().toString(36).slice(2, 8);
+  const swarmChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("atd_swarm_sync") : null;
+  let activeWs = null;
+  let lastPeerBowTime = 0;
+  let lastOwnBowTime = 0;
+  let autoDongTam = true;
+  let currentZone = "";
+  let lastKnownPlace = "";
+  let peerBowEvents = [];
+  let minPeersToBow = Number(localStorage.getItem("atd_dt_min") || "2");
+
+  function triggerBowAction() {
+    const now = Date.now();
+    if (now - lastOwnBowTime < 4800) return false;
+
+    // Chỉ lạy khi nhân vật đang đứng ở nơi có nút Lạy (Chánh điện, Quan Âm, Nguyệt Lão, Bảo Tháp)
+    const layBtn = findActionBtn("Lạy");
+    if (!layBtn || layBtn.disabled) return false;
+
+    lastOwnBowTime = now;
+    fireClick(layBtn);
+    return true;
+  }
+
+  function broadcastSwarmBow() {
+    if (swarmChannel) {
+      try {
+        swarmChannel.postMessage({ type: "SWARM_BOW", from: TAB_ID, time: Date.now() });
+      } catch {}
+    }
+  }
+
+  if (swarmChannel) {
+    swarmChannel.onmessage = (event) => {
+      const data = event.data;
+      if (!data || data.from === TAB_ID) return;
+      if (data.type === "SWARM_BOW" && autoDongTam) {
+        if (triggerBowAction()) {
+          log(`[Đồng tâm Swarm] Nhận hiệu lệnh từ tab khác -> Đã lập tức lạy cùng!`, "ok");
+        }
+      }
+    };
+  }
+
+  // Hook WebSocket để đón bắt các gói tin lạy của người chơi khác trong điện
+  try {
+    const origSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(...args) {
+      activeWs = this;
+      try {
+        const payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
+        if (payload) {
+          if (payload.t === "visit" && payload.zone) {
+            currentZone = payload.zone;
+            lastKnownPlace = payload.zone;
+          }
+          if (payload.t === "emote" && payload.e === "lay") {
+            lastOwnBowTime = Date.now();
+            broadcastSwarmBow();
+          }
+        }
+      } catch {}
+      return origSend.apply(this, args);
+    };
+
+    const origOnMessageDesc = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+    if (origOnMessageDesc && origOnMessageDesc.set) {
+      Object.defineProperty(WebSocket.prototype, "onmessage", {
+        set(fn) {
+          activeWs = this;
+          const wrapped = function(event) {
+            try {
+              if (typeof event.data === "string") {
+                const msg = JSON.parse(event.data);
+                // Bắt gói tin emote lạy của người khác trong phòng
+                if (msg.t === "emote" && msg.e === "lay") {
+                  const now = Date.now();
+                  const peerId = msg.id || "Người chơi";
+                  peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
+                  peerBowEvents.push({ id: peerId, time: now });
+                  lastPeerBowTime = now;
+
+                  const count = peerBowEvents.length;
+                  if (autoDongTam) {
+                    if (count >= minPeersToBow) {
+                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Có ${count} người cùng lạy trong điện -> Lập tức lạy cùng để tối đa công đức!`, "ok");
+                      if (triggerBowAction()) {
+                        broadcastSwarmBow();
+                        peerBowEvents = [];
+                      }
+                    } else {
+                      log(`[Radar Đồng tâm] Đã có 1 người vừa lạy (${peerId}) · Chờ thêm người để gom sóng (mục tiêu ≥${minPeersToBow} người)…`, "wait");
+                    }
+                  }
+                }
+                // Nhận công đức từ chùa
+                if (msg.t === "merit" && msg.gain) {
+                  log(`✦ Nhận công đức từ chùa: +${msg.gain}`, "ok");
+                }
+              }
+            } catch {}
+            return fn.call(this, event);
+          };
+          return origOnMessageDesc.set.call(this, wrapped);
+        },
+        get() {
+          return origOnMessageDesc.get.call(this);
+        }
+      });
+    }
+  } catch (err) {
+    console.warn("[ATD] WebSocket hook:", err);
+  }
+
   // Danh sách nhiệm vụ đầy đủ khớp với giao thức & kiểm tra trạng thái trong src.js
   const ALL_TASKS = [
     { id: "thoikhoa", label: "Thời khóa", once: true },
     { id: "tangkinh", label: "Tàng Kinh Các", once: true },
     { id: "incense", label: "Hương & Lạy", once: false },
+    { id: "dongtam", label: "Lạy đồng tâm", once: false },
     { id: "qa_incense", label: "Hương Quan Âm", once: true },
     { id: "am_incense", label: "Hương Am riêng", once: true },
     { id: "bell", label: "Thỉnh chuông", once: true },
@@ -83,9 +199,17 @@
     while (el.children.length > 120) el.lastElementChild.remove();
   }
 
-  function setStatus(message) {
+  function setStatus(message, state = "info") {
     const el = $("#atd-status");
     if (el) el.textContent = message;
+    const dot = $("#atd-status-dot");
+    if (dot) {
+      dot.className = "atd-status-dot " + (running ? "running" : state);
+    }
+    const fab = $("#atd-fab");
+    if (fab) {
+      fab.title = `An Tự Duyên Auto Task: ${message} (Bấm để mở)`;
+    }
   }
 
   function checkRun(myRun) {
@@ -261,9 +385,80 @@
     }
   }
 
+  // Kiểm tra thông minh xem nhân vật có đang ở sẵn vị trí đó không để tránh mở Bản đồ dịch chuyển thừa
+  function isAlreadyAtPlace(placeIdx, placeName) {
+    const pName = norm(placeName || "");
+
+    // 1. Chánh điện
+    if (placeIdx === PLACES.CHANH_DIEN || pName.includes("chanh dien")) {
+      if (findActionBtn("Lạy") && (findActionBtn("Thắp hương") || findActionBtn("Thắp đèn") || findActionBtn("Tụng kinh") || findActionBtn("Dâng hoa"))) {
+        return true;
+      }
+      if (currentZone && norm(currentZone).includes("chanh dien")) return true;
+    }
+
+    // 2. Gác chuông
+    if (placeIdx === PLACES.GAC_CHUONG || pName.includes("chuong")) {
+      if (findActionBtn("Thỉnh chuông")) return true;
+      if (currentZone && norm(currentZone).includes("chuong")) return true;
+    }
+
+    // 3. Vườn hoa
+    if (placeIdx === PLACES.VUON_HOA || pName.includes("vuon hoa")) {
+      if (findActionBtn("Luống hoa")) return true;
+      if (currentZone && norm(currentZone).includes("vuon hoa")) return true;
+    }
+
+    // 4. Hồ sen · Cầu Duyên
+    if (placeIdx === PLACES.HO_SEN || pName.includes("ho sen")) {
+      if (findActionBtn("Thả hoa đăng") || findActionBtn("Xin xăm") || findActionBtn("Kết duyên")) return true;
+      if (currentZone && norm(currentZone).includes("ho sen")) return true;
+    }
+
+    // 5. Vườn Linh Thú
+    if (placeIdx === PLACES.VUON_LINH_THU || pName.includes("linh thu")) {
+      if (findActionBtn("Linh thú")) return true;
+      if (currentZone && norm(currentZone).includes("linh thu")) return true;
+    }
+
+    // 6. Bàn thầy đồ (Xin chữ)
+    if (placeIdx === PLACES.THAY_DO || pName.includes("xin chu") || pName.includes("thay do")) {
+      if (findActionBtn("Xin chữ")) return true;
+    }
+
+    // 7. Tàng Kinh Các
+    if (placeIdx === PLACES.TANG_KINH_CAC || pName.includes("tang kinh")) {
+      if (findActionBtn("Vào Tàng Kinh Các") || $(".lib.tk.open")) return true;
+    }
+
+    // 8. Am riêng
+    if (placeIdx === PLACES.AM_RIENG || pName.includes("am")) {
+      if (findActionBtn("Ra khỏi am")) return true;
+      if (currentZone && norm(currentZone).includes("am rieng")) return true;
+    }
+
+    // 9. So khớp qua currentZone hoặc lastKnownPlace
+    if (currentZone && pName && norm(currentZone) === pName) {
+      return true;
+    }
+    if (lastKnownPlace && pName && norm(lastKnownPlace) === pName) {
+      return true;
+    }
+
+    return false;
+  }
+
   // Di chuyển nhân vật tới khu vực qua Menu -> Bản đồ (đồng bộ tọa độ state & gói visit lên Server)
   async function teleportToPlace(placeIdx, placeName, myRun) {
     await closeAllModals(myRun);
+
+    // Nếu đã ở sẵn vị trí đó rồi thì không mở bản đồ và không dịch chuyển lại
+    if (isAlreadyAtPlace(placeIdx, placeName)) {
+      log(`Đang ở sẵn ${placeName} · Bỏ qua dịch chuyển.`, "info");
+      lastKnownPlace = placeName;
+      return true;
+    }
+
     if (!clickMenu("bando")) {
       log("Không tìm thấy nút Bản đồ trong Menu.", "warn");
       return false;
@@ -286,6 +481,7 @@
       return false;
     }
     fireClick(target);
+    lastKnownPlace = placeName;
     log(`Di chuyển tới: ${placeName}`, "info");
     // Chờ hiệu ứng chuyển cảnh (420ms) + đồng bộ gói { t: "visit" } và { t: "state" }
     await sleep(1000, myRun);
@@ -295,6 +491,18 @@
   // Di chuyển tới Đài Quan Âm (R3): dùng cơ chế ys.goTo("quanam") qua nút [data-go] hoặc đi bộ từ Hồ sen
   async function teleportToQuanAm(myRun) {
     await closeAllModals(myRun);
+
+    // Kiểm tra xem đã ở sẵn Đài Quan Âm chưa
+    if (findActionBtn("Thắp hương") && findActionBtn("Lạy") && !findActionBtn("Thắp đèn") && !findActionBtn("Tụng kinh")) {
+      log("Đang ở sẵn Đài Quan Âm · Bỏ qua dịch chuyển.", "info");
+      lastKnownPlace = "Đài Quan Âm";
+      return true;
+    }
+    if (lastKnownPlace === "Đài Quan Âm" && findActionBtn("Thắp hương")) {
+      log("Đang ở sẵn Đài Quan Âm · Bỏ qua dịch chuyển.", "info");
+      return true;
+    }
+
     if (clickMenu("nhiemvu")) {
       const meritSheet = await waitFor(() => $(".sheet.merit.open"), 1800, myRun);
       if (meritSheet) {
@@ -308,6 +516,7 @@
           if (goBtn) {
             goBtn.dataset.go = "quanam";
             fireClick(goBtn);
+            lastKnownPlace = "Đài Quan Âm";
             log("Di chuyển tới: Đài Quan Âm", "info");
             await sleep(1000, myRun);
             return true;
@@ -322,6 +531,7 @@
     if (!ok) return false;
     log("Đi bộ dọc bờ hồ tới Đài Quan Âm…", "info");
     await holdKeys(["d", "Shift"], 3200, myRun, () => !!findActionBtn("Thắp hương"));
+    lastKnownPlace = "Đài Quan Âm";
     await sleep(350, myRun);
     return true;
   }
@@ -421,9 +631,82 @@
     const layBtn = findActionBtn("Lạy");
     if (layBtn && !layBtn.disabled) {
       fireClick(layBtn);
+      broadcastSwarmBow();
       log("Lạy Phật tại Chánh điện ({ t: 'emote', e: 'lay' })…", "ok");
       await sleep(5800, myRun);
     }
+    return true;
+  }
+
+  // 3b. Lạy Phật đồng tâm đa người & Swarm ({ t: "emote", e: "lay" })
+  async function runDongTam(myRun) {
+    const ok = await teleportToPlace(PLACES.CHANH_DIEN, "Chánh điện", myRun);
+    if (!ok) return false;
+
+    // Nếu người dùng CHỈ BẬT DUY NHẤT 1 tác vụ "Lạy đồng tâm" (1/18):
+    // Cho nhân vật đứng túc trực yên tại Chánh điện, liên tục lắng nghe người khác lạy & Swarm, KHÔNG dịch chuyển lại
+    if (enabledTasks.size === 1 && enabledTasks.has("dongtam")) {
+      log(`Chế độ Túc trực Chánh điện: Đang canh sóng lạy đông người (mục tiêu ≥${minPeersToBow} người lạy cùng lúc)…`, "ok");
+      setStatus(`Túc trực Chánh điện · Chờ sóng lạy ≥${minPeersToBow} người`);
+
+      let waitSeconds = 0;
+      while (running && myRun === runId) {
+        if (!checkRun(myRun)) return false;
+
+        await sleep(1000, myRun);
+        waitSeconds++;
+
+        if (waitSeconds % 5 === 0) {
+          const recent = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+          setStatus(`Túc trực Chánh điện (${waitSeconds}s) · Sóng hiện tại: ${recent}/${minPeersToBow} người`);
+        }
+
+        // Tự động lạy 1 nhịp sau mỗi 60 giây nếu chưa có sóng đông người (để vừa tích công đức vừa phát sóng Swarm)
+        if (waitSeconds >= 60) {
+          log("Túc trực 60s: Thực hiện 1 nhịp lạy trang nghiêm & phát sóng Swarm…", "info");
+          triggerBowAction();
+          broadcastSwarmBow();
+          await sleep(5800, myRun);
+          waitSeconds = 0;
+        }
+      }
+      return true;
+    }
+
+    log("Chánh điện: Bật radar lắng nghe nhịp lạy đồng tâm từ người khác & Swarm…", "ok");
+    const prevBow = lastPeerBowTime;
+    const startWait = Date.now();
+    let caught = false;
+
+    // Chờ tối đa 8 giây xem có ai trong điện lạy không để bắt nhịp ké
+    while (Date.now() - startWait < 8000) {
+      if (!checkRun(myRun)) return false;
+      if (lastPeerBowTime > prevBow) {
+        caught = true;
+        break;
+      }
+      await sleep(400, myRun);
+    }
+
+    if (!caught) {
+      log("Chưa có ai lạy trước · Chủ động phát nhịp Lạy & hiệu lệnh Swarm…", "wait");
+      triggerBowAction();
+      broadcastSwarmBow();
+    }
+
+    // Chờ trọn 1 nhịp lạy (5.6s)
+    await sleep(5800, myRun);
+
+    // Tam bái (3 lạy liên tiếp) để tăng tối đa cơ hội khớp nhịp đồng tâm với nhiều người
+    for (let bai = 2; bai <= 3; bai++) {
+      if (!checkRun(myRun)) return false;
+      log(`Thực hiện tiếp nhịp lạy trang nghiêm #${bai}/3…`, "ok");
+      triggerBowAction();
+      broadcastSwarmBow();
+      await sleep(5800, myRun);
+    }
+
+    log("Hoàn tất chuỗi Tam bái đồng tâm.", "ok");
     return true;
   }
 
@@ -1052,6 +1335,7 @@
     thoikhoa: runThoiKhoa,
     tangkinh: runTangKinh,
     incense: runIncenseChanhDien,
+    dongtam: runDongTam,
     qa_incense: runQaIncense,
     am_incense: runAmIncense,
     bell: runBell,
@@ -1074,6 +1358,10 @@
       if (!el) continue;
       el.classList.toggle("on", enabledTasks.has(t.id));
       el.classList.toggle("done", doneOnce.has(t.id));
+    }
+    const countEl = $("#atd-task-count");
+    if (countEl) {
+      countEl.textContent = `(${enabledTasks.size}/${ALL_TASKS.length})`;
     }
   }
 
@@ -1134,9 +1422,12 @@
     if (running) return;
     running = true;
     runId++;
-    $("#atd-start").disabled = true;
-    $("#atd-stop").disabled = false;
-    setStatus("Đang khởi chạy chuỗi nhiệm vụ tự động…");
+    const startBtn = $("#atd-start");
+    const stopBtn = $("#atd-stop");
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
+    $("#atd-fab")?.classList.add("running");
+    setStatus("Đang khởi chạy chuỗi nhiệm vụ tự động…", "running");
     log("Bắt đầu chạy Auto Nhiệm Vụ.", "ok");
     mainLoop(runId);
   }
@@ -1148,7 +1439,8 @@
     const stopBtn = $("#atd-stop");
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
-    setStatus(message);
+    $("#atd-fab")?.classList.remove("running");
+    setStatus(message, "warn");
     log(message, "warn");
   }
 
@@ -1158,23 +1450,200 @@
     log("Đã đặt lại trạng thái các nhiệm vụ 1 lần/ngày.", "info");
   }
 
+  // Quản lý vị trí & thu gọn / mở rộng menu
+  // Mặc định đặt tại top: 105px; right: 18px (cách hàng nút Cài đặt của game an toàn > 45px)
+  const DEFAULT_POS = { top: 105, right: 18 };
+
+  function loadPosition() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("atd_pos") || "null");
+      // Nếu vị trí lưu cũ nằm quá cao (< 95px) từng gây đè nút Cài đặt, tự động chuyển về vị trí mới
+      if (saved && typeof saved.top === "number" && saved.top >= 95) {
+        return saved;
+      }
+    } catch {}
+    return DEFAULT_POS;
+  }
+
+  function savePosition(pos) {
+    try {
+      localStorage.setItem("atd_pos", JSON.stringify(pos));
+    } catch {}
+  }
+
+  function applyPosition(el, pos) {
+    if (!el) return;
+    const p = pos || loadPosition();
+    if (typeof p.left === "number") {
+      const maxLeft = Math.max(8, window.innerWidth - (el.offsetWidth || 340) - 8);
+      const left = Math.max(8, Math.min(maxLeft, p.left));
+      el.style.left = `${left}px`;
+      el.style.right = "auto";
+    } else {
+      const right = typeof p.right === "number" ? p.right : 18;
+      el.style.right = `${right}px`;
+      el.style.left = "auto";
+    }
+
+    const maxTop = Math.max(8, window.innerHeight - (el.offsetHeight || 50) - 8);
+    const top = Math.max(8, Math.min(maxTop, p.top || 105));
+    el.style.top = `${top}px`;
+  }
+
+  function setCollapsed(collapsed) {
+    const fab = $("#atd-fab");
+    const panel = $("#atd-panel");
+    const pos = loadPosition();
+
+    if (collapsed) {
+      if (panel) {
+        panel.classList.add("hidden");
+        panel.style.display = "none";
+      }
+      if (fab) {
+        fab.style.display = "flex";
+        applyPosition(fab, pos);
+      }
+      try { localStorage.setItem("atd_collapsed", "1"); } catch {}
+    } else {
+      if (fab) {
+        fab.style.display = "none";
+      }
+      if (panel) {
+        panel.style.display = "block";
+        panel.classList.remove("hidden");
+        applyPosition(panel, pos);
+      }
+      try { localStorage.setItem("atd_collapsed", "0"); } catch {}
+    }
+  }
+
+  function openPanel() {
+    setCollapsed(false);
+  }
+
+  function closePanel() {
+    setCollapsed(true);
+  }
+
+  function attachDraggable(handleEl, targetEl, onDragEnd) {
+    let isDown = false;
+    let startX = 0, startY = 0;
+    let initialLeft = 0, initialTop = 0;
+    let hasMoved = false;
+
+    handleEl.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      // Không kéo thả khi click vào nút con bên trong handle (ví dụ nút '-' thu gọn)
+      if (e.target.closest("button") && e.target.closest("button") !== handleEl) return;
+
+      isDown = true;
+      hasMoved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      const rect = targetEl.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+
+      try { handleEl.setPointerCapture(e.pointerId); } catch {}
+    });
+
+    handleEl.addEventListener("pointermove", (e) => {
+      if (!isDown) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.hypot(dx, dy) > 5) {
+        hasMoved = true;
+      }
+      if (!hasMoved) return;
+
+      const maxLeft = Math.max(8, window.innerWidth - targetEl.offsetWidth - 8);
+      const maxTop = Math.max(8, window.innerHeight - targetEl.offsetHeight - 8);
+      const curLeft = Math.max(8, Math.min(maxLeft, initialLeft + dx));
+      const curTop = Math.max(8, Math.min(maxTop, initialTop + dy));
+
+      targetEl.style.left = `${curLeft}px`;
+      targetEl.style.top = `${curTop}px`;
+      targetEl.style.right = "auto";
+    });
+
+    const onPointerUp = (e) => {
+      if (!isDown) return;
+      isDown = false;
+      try { handleEl.releasePointerCapture(e.pointerId); } catch {}
+      if (hasMoved) {
+        const rect = targetEl.getBoundingClientRect();
+        const pos = { left: Math.round(rect.left), top: Math.round(rect.top) };
+        savePosition(pos);
+        if (onDragEnd) onDragEnd(pos);
+      }
+    };
+
+    handleEl.addEventListener("pointerup", onPointerUp);
+    handleEl.addEventListener("pointercancel", onPointerUp);
+
+    return () => hasMoved;
+  }
+
   function mount() {
-    if ($("#atd-panel")) return;
+    if ($("#atd-fab") || $("#atd-panel")) return;
+
+    // 1. Nút tròn Hoa Sen thu gọn (#atd-fab)
+    const fab = document.createElement("button");
+    fab.id = "atd-fab";
+    fab.type = "button";
+    fab.title = "An Tự Duyên Auto Task (Bấm để mở bảng điều khiển)";
+    fab.setAttribute("aria-label", "Auto Task");
+    fab.innerHTML = `
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3c-1.5 3.5-1.5 7.5 0 11 1.5-3.5 1.5-7.5 0-11z" fill="rgba(255,255,255,0.22)"/>
+        <path d="M12 14c-2.5-1.5-5.5-2-8.5-1 1.8 3.5 4.5 5.5 8.5 6 4-.5 6.7-2.5 8.5-6-3-1-6-.5-8.5 1z" fill="rgba(255,255,255,0.18)"/>
+        <path d="M12 14c-1.5-3-4.5-5.5-8-6 .5 3.5 2.5 6.5 5.5 8"/>
+        <path d="M12 14c1.5-3 4.5-5.5 8-6-.5 3.5-2.5 6.5-5.5 8"/>
+        <circle cx="12" cy="14" r="1.5" fill="currentColor"/>
+      </svg>
+      <span id="atd-fab-badge"></span>
+    `;
+    document.documentElement.appendChild(fab);
+
+    // Kéo thả nút tròn
+    const fabMoved = attachDraggable(fab, fab);
+
+    fab.addEventListener("click", () => {
+      if (fabMoved()) return;
+      setCollapsed(false);
+    });
+
+    // 2. Bảng điều khiển Menu chính (#atd-panel)
     const panel = document.createElement("section");
     panel.id = "atd-panel";
     panel.innerHTML = `
       <div class="atd-head">
-        <div>
-          <strong>An Tự Duyên · Auto Task 2.0</strong>
-          <small>Tự động di chuyển & làm trọn nhiệm vụ</small>
+        <div class="atd-brand">
+          <div class="atd-brand-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#e5bc72" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3c-1.5 3.5-1.5 7.5 0 11 1.5-3.5 1.5-7.5 0-11z" fill="rgba(229,188,114,0.3)"/>
+              <path d="M12 14c-2.5-1.5-5.5-2-8.5-1 1.8 3.5 4.5 5.5 8.5 6 4-.5 6.7-2.5 8.5-6-3-1-6-.5-8.5 1z" fill="rgba(229,188,114,0.2)"/>
+              <path d="M12 14c-1.5-3-4.5-5.5-8-6 .5 3.5 2.5 6.5 5.5 8"/>
+              <path d="M12 14c1.5-3 4.5-5.5 8-6-.5 3.5-2.5 6.5-5.5 8"/>
+            </svg>
+          </div>
+          <div>
+            <strong>An Tự Duyên · Auto 2.0</strong>
+            <small>Tự động di chuyển & làm trọn nhiệm vụ</small>
+          </div>
         </div>
-        <button id="atd-min" title="Thu gọn" aria-label="Thu gọn">−</button>
+        <button id="atd-min" title="Thu gọn bảng điều khiển" aria-label="Thu gọn">−</button>
       </div>
       <div id="atd-body">
-        <div class="atd-status" id="atd-status">Sẵn sàng · bấm Chạy để tự động thực hiện</div>
+        <div class="atd-status">
+          <span class="atd-status-dot" id="atd-status-dot"></span>
+          <span id="atd-status">Sẵn sàng · bấm Chạy để tự động thực hiện</span>
+        </div>
         <div class="atd-config">
           <div class="atd-config-head">
-            <span class="atd-config-title">Tác vụ tự động (bấm để bật/tắt)</span>
+            <span class="atd-config-title">Tác vụ tự động <span id="atd-task-count">(${enabledTasks.size}/${ALL_TASKS.length})</span></span>
             <div class="atd-mini-btns">
               <button id="atd-all" type="button">Tất cả</button>
               <button id="atd-farm" type="button">Chỉ Mõ/Hạt</button>
@@ -1182,20 +1651,40 @@
           </div>
           <div class="atd-tags">
             ${ALL_TASKS.map(
-      (t) =>
-        `<button type="button" class="atd-tag on" data-task="${t.id}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"
-        }">${t.label}</button>`
-    ).join("")}
+              (t) =>
+                `<button type="button" class="atd-tag on" data-task="${t.id}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}">${t.label}</button>`
+            ).join("")}
           </div>
           <div class="atd-opts">
-            <label>
-              <input type="checkbox" id="atd-loop" checked>
-              <span>Tự động lặp (Mõ, Chuỗi hạt, Hương & Lạy, Nhận thưởng)</span>
+            <label class="atd-switch-row">
+              <span class="atd-switch">
+                <input type="checkbox" id="atd-loop" checked>
+                <span class="atd-slider"></span>
+              </span>
+              <span>Tự động lặp (Mõ, Hạt, Hương, Đồng tâm, Thưởng)</span>
             </label>
-            <label>
-              <input type="checkbox" id="atd-khoe">
+            <label class="atd-switch-row">
+              <span class="atd-switch">
+                <input type="checkbox" id="atd-khoe">
+                <span class="atd-slider"></span>
+              </span>
               <span>Kèm lưu ảnh Thời khóa ({ t: "khoe" })</span>
             </label>
+            <label class="atd-switch-row">
+              <span class="atd-switch">
+                <input type="checkbox" id="atd-dongtam" checked>
+                <span class="atd-slider"></span>
+              </span>
+              <span>Bắt nhịp Lạy đồng tâm & Swarm đa tab</span>
+            </label>
+            <div class="atd-mini-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:7px;padding:2px 0 1px;">
+              <span style="font-size:11px;color:#d8d3c8;">Canh lạy cùng lúc:</span>
+              <div class="atd-mini-btns" id="atd-dongtam-targets">
+                <button type="button" class="atd-dt-opt ${minPeersToBow === 1 ? 'on' : ''}" data-target="1" title="Có bất kỳ ai lạy là lạy theo ngay">≥1 người</button>
+                <button type="button" class="atd-dt-opt ${minPeersToBow === 2 ? 'on' : ''}" data-target="2" title="Chờ từ 2 người trở lên lạy cùng lúc để tối đa công đức">≥2 người</button>
+                <button type="button" class="atd-dt-opt ${minPeersToBow >= 3 ? 'on' : ''}" data-target="3" title="Chờ đám đông từ 3 người lạy cùng lúc">≥3 người</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="atd-actions">
@@ -1203,24 +1692,48 @@
           <button id="atd-stop" type="button" disabled>■ Dừng</button>
           <button id="atd-reset" type="button" title="Chạy lại các nhiệm vụ ngày đã đánh dấu xong">↻ Ngày mới</button>
         </div>
-        <div class="atd-log-title">Nhật ký hoạt động</div>
+        <div class="atd-log-title">
+          <span>Nhật ký hoạt động</span>
+          <small style="font-weight:400;opacity:0.65;font-size:10px;">tự động lưu</small>
+        </div>
         <div id="atd-log" aria-live="polite"></div>
-        <p class="atd-note">Tiện ích tự động dịch chuyển nhân vật qua Bản đồ/Menu để khớp vị trí (<code>visit</code>, <code>state</code>, <code>am-in</code>), kiểm tra điều kiện tiên quyết và giữ nhịp gửi gói tin an toàn.</p>
+        <p class="atd-note">Tiện ích tự động di chuyển nhân vật qua Bản đồ/Menu để khớp vị trí (<code>visit</code>, <code>state</code>, <code>am-in</code>), kiểm tra điều kiện tiên quyết và giữ nhịp gửi gói tin an toàn.</p>
       </div>`;
     document.documentElement.appendChild(panel);
+
+    // Kéo thả panel bằng thanh tiêu đề
+    const head = $(".atd-head", panel);
+    attachDraggable(head, panel);
+
+    // Nút thu gọn
+    $("#atd-min", panel).addEventListener("click", (e) => {
+      e.stopPropagation();
+      setCollapsed(true);
+    });
 
     $("#atd-start", panel).addEventListener("click", start);
     $("#atd-stop", panel).addEventListener("click", () => stop("Đã dừng theo yêu cầu."));
     $("#atd-reset", panel).addEventListener("click", resetDailyState);
-    $("#atd-min", panel).addEventListener("click", () =>
-      panel.classList.toggle("collapsed")
-    );
 
     $("#atd-loop", panel).addEventListener("change", (e) => {
       loopMode = e.target.checked;
     });
     $("#atd-khoe", panel).addEventListener("change", (e) => {
       enableKhoe = e.target.checked;
+    });
+    $("#atd-dongtam", panel).addEventListener("change", (e) => {
+      autoDongTam = e.target.checked;
+      log(autoDongTam ? "Đã bật radar Bắt nhịp Lạy đồng tâm & Swarm." : "Đã tắt Bắt nhịp Lạy đồng tâm.", "info");
+    });
+
+    $$(".atd-dt-opt", panel).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const val = Number(btn.dataset.target || "2");
+        minPeersToBow = val;
+        try { localStorage.setItem("atd_dt_min", String(val)); } catch {}
+        $$(".atd-dt-opt", panel).forEach((b) => b.classList.toggle("on", b === btn));
+        log(`Mục tiêu Lạy đồng tâm: Chờ sóng từ ≥${val} người lạy cùng lúc.`, "ok");
+      });
     });
 
     $("#atd-all", panel).addEventListener("click", () => {
@@ -1229,7 +1742,7 @@
     });
     $("#atd-farm", panel).addEventListener("click", () => {
       enabledTasks.clear();
-      ["mo", "beads", "incense", "claim"].forEach((id) => enabledTasks.add(id));
+      ["mo", "beads", "incense", "dongtam", "claim"].forEach((id) => enabledTasks.add(id));
       updateTagUI();
     });
 
@@ -1242,7 +1755,20 @@
       });
     });
 
-    log("Auto Task 2.0 đã sẵn sàng. Bấm ▶ Chạy Auto để bắt đầu.", "ok");
+    // Trạng thái ban đầu: nếu người dùng chưa mở thì mặc định thu gọn thành nút tròn (#atd-fab)
+    const initiallyCollapsed = localStorage.getItem("atd_collapsed") !== "0";
+    setCollapsed(initiallyCollapsed);
+
+    // Tự căn lại vị trí khi đổi kích thước màn hình
+    window.addEventListener("resize", () => {
+      const pos = loadPosition();
+      const currentFab = $("#atd-fab");
+      const currentPanel = $("#atd-panel");
+      if (currentFab && currentFab.style.display !== "none") applyPosition(currentFab, pos);
+      if (currentPanel && currentPanel.style.display !== "none") applyPosition(currentPanel, pos);
+    });
+
+    log("Auto Task 2.0 đã sẵn sàng. Bấm nút Hoa Sen hoặc ▶ Chạy Auto để bắt đầu.", "ok");
   }
 
   if (document.readyState === "loading") {
