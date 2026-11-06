@@ -1,7 +1,7 @@
 # an_tu_duyen_auto_task
 ## An Tự Duyên Auto Task – Chrome / Edge Extension 2.0
 
-Tiện ích tự động di chuyển nhân vật, thực hiện đầy đủ chuỗi 15 nhiệm vụ hàng ngày/tuần và nhận thưởng công đức trên **An Tự Duyên** (`https://didenchua.online/`).
+Tiện ích tự động di chuyển nhân vật, thực hiện đầy đủ chuỗi 17 nhiệm vụ hàng ngày/tuần và nhận thưởng công đức trên **An Tự Duyên** (`https://didenchua.online/`).
 
 ---
 
@@ -21,6 +21,7 @@ Tiện ích tự động di chuyển nhân vật, thực hiện đầy đủ chu
 - **Thỉnh chuông & Thắp đèn**: Tự đến Gác chuông thỉnh chuông (`bell`) và thắp đèn Chánh điện (`lamp`).
 - **Vườn hoa & Dâng hoa**: Tự gieo hạt (`plant`), tưới hoa (`water`), hái hoa nở (`pick`) và mang vào Chánh điện dâng hoa (`offer-flowers`).
 - **Quét lá & Phóng sinh**: Tự gom 20 chiếc lá ngay trước mặt để bước 1 nhịp quét sạch (`quet`) và ra mép Hồ sen thả cá phóng sinh (`ca`).
+- **Thả hoa đăng & Xin xăm**: Tự đến Hồ sen · Cầu Duyên chọn lời nguyện thả hoa đăng cầu an (`lantern`) và lắc ống xăm duyên lấy quẻ xăm đầu ngày (`xam`).
 - **Vườn Linh Thú & Xin chữ**: Tự rắc hạt cho linh thú ăn (`pet-feed`) và xin chữ Thầy đồ hàng ngày (`chu-xin`).
 - **Gõ mõ 108 & Chuỗi hạt 108**: Tự gõ mõ và lần tràng hạt đủ **108 lần** theo từng đợt tốc độ cao (auto-click) kết hợp ngắt nhịp chuẩn chu kỳ 2 giây của máy chủ (`mo`, `beads`).
 - **Nhận thưởng**: Tự động kiểm tra và bấm nhận thưởng ở cả 3 tab **Nhiệm vụ ngày**, **Tuần**, **Nhập môn** & **Lễ hội** (`claim`, `claim-le`).

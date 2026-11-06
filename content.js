@@ -14,6 +14,8 @@
     { id: "garden", label: "Vườn hoa & Dâng hoa", once: true },
     { id: "quet", label: "Quét lá", once: true },
     { id: "ca", label: "Phóng sinh", once: true },
+    { id: "hoadang", label: "Hoa đăng", once: true },
+    { id: "xinxam", label: "Xin xăm", once: true },
     { id: "linhthu", label: "Vườn Linh Thú", once: true },
     { id: "thaydo", label: "Xin chữ", once: true },
     { id: "mo", label: "Gõ mõ", once: false },
@@ -214,41 +216,46 @@
   async function closeAllModals(myRun) {
     checkRun(myRun);
     if (document.body.classList.contains("tinh-tam")) {
-      $(".calm [data-act='out']")?.click();
+      fireClick($(".calm [data-act='out']"));
       await sleep(250, myRun);
     }
     if ($(".chant.open")) {
-      $(".chant.open .chant-close")?.click();
+      fireClick($(".chant.open .chant-close"));
       await sleep(250, myRun);
     }
     if ($(".beads.open")) {
-      $(".beads.open .beads-close")?.click();
+      fireClick($(".beads.open .beads-close"));
       await sleep(250, myRun);
     }
     for (const libClose of $$(".lib.open .lib-close")) {
-      libClose.click();
+      fireClick(libClose);
       await sleep(200, myRun);
     }
     for (const sheetClose of $$(".sheet.open .sheet-close")) {
-      sheetClose.click();
+      fireClick(sheetClose);
       await sleep(200, myRun);
+    }
+    const shareNo = $(".tk-invite.open .tk-no");
+    if (shareNo) {
+      fireClick(shareNo);
+      await sleep(150, myRun);
     }
     const choreStop = $(".chore-pill.show button");
     if (choreStop && visible(choreStop)) {
-      choreStop.click();
+      fireClick(choreStop);
       await sleep(200, myRun);
     }
     if (document.body.classList.contains("in-am")) {
       const outBtn = findActionBtn("Ra khỏi am");
       if (outBtn) {
-        outBtn.click();
+        fireClick(outBtn);
         await sleep(950, myRun);
       }
     }
     if (document.body.classList.contains("in-phap")) {
       const outBtn = findActionBtn("Ra ngoài");
       if (outBtn) {
-        outBtn.click();
+        fireClick(outBtn);
         await sleep(950, myRun);
       }
     }
@@ -294,19 +301,19 @@
         for (const tabId of ["nv", "tuan", "nm"]) {
           const tabBtn = $(`[data-tab="${tabId}"]`, meritSheet);
           if (tabBtn && !tabBtn.classList.contains("on")) {
-            tabBtn.click();
+            fireClick(tabBtn);
             await sleep(180, myRun);
           }
           const goBtn = $("[data-go]", meritSheet);
           if (goBtn) {
             goBtn.dataset.go = "quanam";
-            goBtn.click();
+            fireClick(goBtn);
             log("Di chuyển tới: Đài Quan Âm", "info");
             await sleep(1000, myRun);
             return true;
           }
         }
-        $(".sheet-close", meritSheet)?.click();
+        fireClick($(".sheet-close", meritSheet));
         await sleep(200, myRun);
       }
     }
@@ -331,7 +338,7 @@
       const txt = norm(goBtn.textContent);
       if (txt.includes("bắt đầu")) {
         log("Thời khóa: Bắt đầu dâng hương ở Sân chùa…", "ok");
-        goBtn.click();
+        fireClick(goBtn);
         // Nhân vật tự dịch chuyển ra Sân chùa, đi tới lư hương E8 và thắp hương
         const reopened = await waitFor(
           () => $(".sheet.thoikhoa.open [data-act='go']"),
@@ -350,7 +357,7 @@
       const txt = norm(goBtn.textContent);
       if (txt.includes("lạy") || txt.includes("tiếp")) {
         log("Thời khóa: Thực hiện 3 lạy & hoàn tất Thời khóa ({ t: 'tk-done' })…", "ok");
-        goBtn.click();
+        fireClick(goBtn);
         // Chờ 5.6 giây lễ lạy + gửi { t: "tk-done" }
         await sleep(6300, myRun);
       }
@@ -362,12 +369,12 @@
       const shareBtn = $(".sheet.thoikhoa.open [data-act='share']");
       if (shareBtn && visible(shareBtn)) {
         log("Gửi sự kiện chia sẻ ảnh ({ t: 'khoe' })…", "ok");
-        shareBtn.click();
+        fireClick(shareBtn);
         await sleep(800, myRun);
       }
     }
 
-    $(".sheet.thoikhoa.open .sheet-close")?.click();
+    fireClick($(".sheet.thoikhoa.open .sheet-close"));
     await sleep(300, myRun);
     return true;
   }
@@ -391,10 +398,10 @@
     const pick = cards[tkReadCursor % cards.length] || card;
     tkReadCursor++;
     const title = pick.querySelector("b")?.textContent || pick.dataset.id;
-    pick.click();
+    fireClick(pick);
     log(`Đã đọc bài Tàng Kinh Các: ${title} ({ t: "tk-read" })`, "ok");
     await sleep(900, myRun);
-    $(".lib.tk.open .lib-close")?.click();
+    fireClick($(".lib.tk.open .lib-close"));
     await sleep(350, myRun);
     return true;
   }
@@ -406,14 +413,14 @@
 
     const huongBtn = await waitFor(() => findActionBtn("Thắp hương"), 2000, myRun);
     if (huongBtn) {
-      huongBtn.click();
+      fireClick(huongBtn);
       log("Dâng hương tại Chánh điện ({ t: 'incense' })…", "ok");
       await sleep(3200, myRun);
     }
 
     const layBtn = findActionBtn("Lạy");
     if (layBtn && !layBtn.disabled) {
-      layBtn.click();
+      fireClick(layBtn);
       log("Lạy Phật tại Chánh điện ({ t: 'emote', e: 'lay' })…", "ok");
       await sleep(5800, myRun);
     }
@@ -430,7 +437,7 @@
       log("Chưa thấy nút Thắp hương tại Đài Quan Âm.", "warn");
       return false;
     }
-    huongBtn.click();
+    fireClick(huongBtn);
     log("Dâng hương tại Đài Quan Âm ({ t: 'qa-incense' })…", "ok");
     await sleep(3200, myRun);
     return true;
@@ -445,7 +452,7 @@
     // Nếu chưa đăng nhập tài khoản, game sẽ mở bảng Hồ sơ (.sheet.journal.open)
     if ($(".sheet.journal.open")) {
       log("Chưa đăng nhập tài khoản Sổ công đức nên chưa có Am riêng; bỏ qua.", "warn");
-      $(".sheet.journal.open .sheet-close")?.click();
+      fireClick($(".sheet.journal.open .sheet-close"));
       await sleep(250, myRun);
       return true;
     }
@@ -462,7 +469,7 @@
 
     const huongBtn = await waitFor(() => findActionBtn("Thắp hương"), 2000, myRun);
     if (huongBtn) {
-      huongBtn.click();
+      fireClick(huongBtn);
       await sleep(400, myRun);
       if (getToastText().includes("chưa có lư hương")) {
         log("Am riêng chưa đặt lư hương trên bàn thờ; bỏ qua.", "warn");
@@ -474,7 +481,7 @@
 
     const outBtn = findActionBtn("Ra khỏi am");
     if (outBtn) {
-      outBtn.click();
+      fireClick(outBtn);
       await sleep(1000, myRun);
     }
     return true;
@@ -490,7 +497,7 @@
       log("Chưa thấy nút Thỉnh chuông tại Gác chuông.", "warn");
       return false;
     }
-    bellBtn.click();
+    fireClick(bellBtn);
     log("Thỉnh chuông tại Gác chuông ({ t: 'bell' })…", "ok");
     await sleep(3200, myRun);
     return true;
@@ -514,7 +521,7 @@
     }
 
     try {
-      lampBtn.click();
+      fireClick(lampBtn);
       await sleep(350, myRun);
       const toast = getToastText();
       if (toast.includes("đã thắp một ngọn đèn rồi")) {
@@ -540,7 +547,7 @@
       const btn = await waitFor(() => findActionBtn("Luống hoa"), 2000, myRun);
       if (!btn) return null;
       if (!$(".sheet.garden.open")) {
-        btn.click();
+        fireClick(btn);
       }
       return await waitFor(() => $(".sheet.garden.open"), 1800, myRun);
     };
@@ -552,7 +559,7 @@
     // 8a. Nếu luống đang trống -> Gieo hạt Sen (hoặc giống đầu tiên)
     const seedBtn = $('[data-plant="sen"]', sheet) || $("[data-plant]", sheet);
     if (seedBtn && visible(seedBtn)) {
-      seedBtn.click();
+      fireClick(seedBtn);
       log("Đã gieo hạt giống tại Vườn hoa ({ t: 'plant' }).", "ok");
       await sleep(900, myRun);
     }
@@ -562,14 +569,14 @@
     if (sheet) {
       const pickBtn = $('[data-act="pick"]', sheet);
       if (pickBtn && visible(pickBtn) && !pickBtn.disabled) {
-        pickBtn.click();
+        fireClick(pickBtn);
         log("Đã hái hoa nở tại Vườn hoa ({ t: 'pick' }).", "ok");
         await sleep(900, myRun);
         // Gieo lại hạt mới sau khi hái
         const replantBtn =
           $('[data-plant="sen"]', sheet) || $("[data-plant]", sheet);
         if (replantBtn && visible(replantBtn)) {
-          replantBtn.click();
+          fireClick(replantBtn);
           log("Đã gieo lại hạt giống mới sau khi hái.", "ok");
           await sleep(800, myRun);
         }
@@ -581,7 +588,7 @@
     if (sheet) {
       const waterBtn = $('[data-act="water"]:not([disabled])', sheet);
       if (waterBtn && visible(waterBtn)) {
-        waterBtn.click();
+        fireClick(waterBtn);
         log("Đang tưới hoa ({ t: 'water' })…", "ok");
         // Nhân vật tự đi tới luống hoa, cúi tưới và gửi gói { t: "water" }
         await sleep(3400, myRun);
@@ -597,7 +604,7 @@
     if (sheet) {
       const pickAfter = $('[data-act="pick"]', sheet);
       if (pickAfter && visible(pickAfter) && !pickAfter.disabled) {
-        pickAfter.click();
+        fireClick(pickAfter);
         log("Hoa vừa nở sau khi tưới · đã hái hoa ({ t: 'pick' }).", "ok");
         await sleep(900, myRun);
       }
@@ -607,17 +614,17 @@
     sheet = $(".sheet.garden.open");
     const toHallBtn = sheet ? $('[data-act="hall"]', sheet) : null;
     if (toHallBtn && visible(toHallBtn)) {
-      toHallBtn.click();
+      fireClick(toHallBtn);
       log("Mang hoa vừa hái vào Chánh điện…", "info");
       await sleep(1100, myRun);
       const offerBtn = await waitFor(() => findActionBtn("Dâng hoa"), 2000, myRun);
       if (offerBtn) {
-        offerBtn.click();
+        fireClick(offerBtn);
         log("Dâng hoa lên bàn thờ Phật ({ t: 'offer-flowers' })…", "ok");
         await sleep(3400, myRun);
       }
     } else if (sheet) {
-      $(".sheet-close", sheet)?.click();
+      fireClick($(".sheet-close", sheet));
       await sleep(250, myRun);
     }
 
@@ -732,21 +739,115 @@
     }
   }
 
-  // 11. Vườn Linh Thú: Cho thú ăn ({ t: "emote", e: "gieo" }, { t: "pet-feed" })
+  // 11. Thả hoa đăng tại Hồ sen ({ t: "lantern", color, text })
+  async function runHoaDang(myRun) {
+    await closeAllModals(myRun);
+    let denBtn = findActionBtn("Thả hoa đăng");
+    if (!denBtn) {
+      const ok = await teleportToPlace(PLACES.HO_SEN, "Hồ sen · Cầu Duyên", myRun);
+      if (!ok) return false;
+      denBtn = await waitFor(() => findActionBtn("Thả hoa đăng"), 2000, myRun);
+    }
+    if (!denBtn) {
+      log("Không tìm thấy nút Thả hoa đăng tại Hồ sen.", "warn");
+      return false;
+    }
+
+    fireClick(denBtn);
+    const sheet = await waitFor(() => $(".sheet.lantern.open"), 2000, myRun);
+    if (!sheet) {
+      log("Không mở được giao diện Thả hoa đăng.", "warn");
+      return false;
+    }
+
+    // Chọn lời nguyện có sẵn từ danh sách chips hoặc gán nội dung mẫu
+    const chips = $$(".chips button", sheet);
+    if (chips.length > 0) {
+      const pickChip = chips[Math.floor(Math.random() * chips.length)];
+      fireClick(pickChip);
+      await sleep(200, myRun);
+    } else {
+      const textarea = $("textarea", sheet);
+      if (textarea) {
+        textarea.value = "Cầu cho cả nhà luôn bình an, mạnh khỏe và vạn sự như ý.";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+
+    const releaseBtn = $("button.release", sheet);
+    if (!releaseBtn) {
+      fireClick($(".sheet-close", sheet));
+      return false;
+    }
+
+    fireClick(releaseBtn);
+    log("Đã thả hoa đăng cầu an tại Hồ sen ({ t: 'lantern' }).", "ok");
+    await sleep(1500, myRun);
+
+    const shareNo = $(".tk-invite.open .tk-no");
+    if (shareNo) fireClick(shareNo);
+    await closeAllModals(myRun);
+    return true;
+  }
+
+  // 12. Xin xăm duyên tại Hồ sen ({ t: "xam", n })
+  async function runXinXam(myRun) {
+    await closeAllModals(myRun);
+    let xamBtn = findActionBtn("Xin xăm");
+    if (!xamBtn) {
+      const ok = await teleportToPlace(PLACES.HO_SEN, "Hồ sen · Cầu Duyên", myRun);
+      if (!ok) return false;
+      xamBtn = await waitFor(() => findActionBtn("Xin xăm"), 2000, myRun);
+    }
+    if (!xamBtn) {
+      log("Không tìm thấy nút Xin xăm tại Hồ sen.", "warn");
+      return false;
+    }
+
+    fireClick(xamBtn);
+    const sheet = await waitFor(() => $(".sheet.fortune.open"), 2000, myRun);
+    if (!sheet) {
+      log("Không mở được giao diện Xin xăm duyên.", "warn");
+      return false;
+    }
+
+    const shakeBtn = $("button.shake", sheet);
+    if (!shakeBtn) {
+      fireClick($(".sheet-close", sheet));
+      return false;
+    }
+
+    fireClick(shakeBtn);
+    log("Đang lắc ống xăm duyên tại Hồ sen…", "info");
+
+    const resultHead = await waitFor(() => $(".sheet.fortune.open .paper-head"), 3500, myRun);
+    const queText = resultHead ? resultHead.textContent.trim() : "Quẻ xăm";
+
+    log(`Đã xin được: ${queText} ({ t: 'xam' }).`, "ok");
+    await sleep(1200, myRun);
+
+    const againBtn = $(".sheet.fortune.open .again") || $(".sheet.fortune.open .sheet-close");
+    if (againBtn) fireClick(againBtn);
+    await sleep(300, myRun);
+    await closeAllModals(myRun);
+    return true;
+  }
+
+  // 13. Vườn Linh Thú: Cho thú ăn ({ t: "emote", e: "gieo" }, { t: "pet-feed" })
   async function runLinhThu(myRun) {
     const ok = await teleportToPlace(PLACES.VUON_LINH_THU, "Vườn Linh Thú", myRun);
     if (!ok) return false;
 
     const feedBtn = await waitFor(() => findActionBtn("Cho ăn"), 2000, myRun);
     if (feedBtn) {
-      feedBtn.click();
+      fireClick(feedBtn);
       log("Đã rắc hạt cho linh thú ăn tại Vườn Linh Thú.", "ok");
       await sleep(1600, myRun);
     }
     return true;
   }
 
-  // 12. Xin chữ Thầy đồ ({ t: "chu-xin", chu })
+  // 14. Xin chữ Thầy đồ ({ t: "chu-xin", chu })
   async function runThayDo(myRun) {
     await closeAllModals(myRun);
     if (!clickMenu("thaydo")) return false;
@@ -758,14 +859,14 @@
     const wishBtn = $(".td-wish:not([disabled])", sheet);
     if (wishBtn && visible(wishBtn)) {
       const wishText = wishBtn.textContent.trim();
-      wishBtn.click();
+      fireClick(wishBtn);
       log(`Xin chữ Thầy đồ: "${wishText}" ({ t: "chu-xin" })…`, "ok");
       await sleep(1500, myRun);
     } else {
       log("Hôm nay đã xin chữ Thầy đồ rồi.", "info");
     }
 
-    $(".sheet.thaydo.open .sheet-close")?.click();
+    fireClick($(".sheet.thaydo.open .sheet-close"));
     await sleep(300, myRun);
     return true;
   }
@@ -905,14 +1006,14 @@
       checkRun(myRun);
       const tabBtn = $(`[data-tab="${tabId}"]`, sheet);
       if (tabBtn) {
-        tabBtn.click();
+        fireClick(tabBtn);
         await sleep(300, myRun);
       }
 
       // Nhận thưởng lễ hội nếu đủ tiến độ ({ t: "claim-le" })
       const claimLeBtn = $("[data-claimle]:not([disabled])", sheet);
       if (claimLeBtn && visible(claimLeBtn)) {
-        claimLeBtn.click();
+        fireClick(claimLeBtn);
         claimedCount++;
         log("Đã nhận thưởng Lễ hội ({ t: 'claim-le' })!", "ok");
         await sleep(500, myRun);
@@ -921,7 +1022,7 @@
       // Nhận tất cả nếu có nút [data-claimall]
       const claimAllBtn = $("[data-claimall]:not([disabled])", sheet);
       if (claimAllBtn && visible(claimAllBtn)) {
-        claimAllBtn.click();
+        fireClick(claimAllBtn);
         claimedCount++;
         log(`Đã bấm Nhận tất cả ở mục ${tabId.toUpperCase()}!`, "ok");
         await sleep(600, myRun);
@@ -931,7 +1032,7 @@
       const readyBtns = $$("[data-claim]:not([disabled])", sheet).filter(visible);
       for (const btn of readyBtns) {
         const qId = btn.dataset.claim;
-        btn.click();
+        fireClick(btn);
         claimedCount++;
         log(`Đã nhận thưởng nhiệm vụ: ${qId} ({ t: "claim" })`, "ok");
         await sleep(450, myRun);
@@ -942,7 +1043,7 @@
       log("Đã kiểm tra bảng Nhiệm vụ: hiện chưa có mốc thưởng mới cần nhận.", "info");
     }
 
-    $(".sheet.merit.open .sheet-close")?.click();
+    fireClick($(".sheet.merit.open .sheet-close"));
     await sleep(300, myRun);
     return true;
   }
@@ -958,6 +1059,8 @@
     garden: runGarden,
     quet: runQuetLa,
     ca: runPhongSinh,
+    hoadang: runHoaDang,
+    xinxam: runXinXam,
     linhthu: runLinhThu,
     thaydo: runThayDo,
     mo: runMo,
