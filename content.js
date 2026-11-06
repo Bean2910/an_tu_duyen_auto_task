@@ -153,21 +153,38 @@
     return fireClick(btn);
   }
 
-  // Giữ hướng camera cố định tạm thời (cập nhật De.manualAt trong t8) để di chuyển bàn phím chính xác
-  function lockCameraAutoFollow() {
-    const canvas = document.getElementById("scene");
-    if (!canvas) return;
+  // Bật/tắt "Camera tự theo sau lưng" (De.autoFollow) đồng bộ qua .sheet.settings để cố định góc nhìn khi di chuyển W/A/S/D
+  function setCameraAutoFollow(wantEnabled) {
+    const stSheet = $(".sheet.settings");
+    if (!stSheet) return null;
+    const wasOpen = stSheet.classList.contains("open");
+    const prevVis = stSheet.style.visibility;
+    let previousState = null;
     try {
-      canvas.dispatchEvent(
-        new WheelEvent("wheel", { deltaY: 0, bubbles: true, cancelable: true })
-      );
-    } catch { }
+      stSheet.style.visibility = "hidden";
+      if (!wasOpen) clickMenu("caidat");
+      const haTab = $('.tabs button[data-tab="ha"]', stSheet);
+      if (haTab) fireClick(haTab);
+      const cb = $('input[data-toggle="autoCam"]', stSheet);
+      if (cb) {
+        previousState = cb.checked;
+        if (cb.checked !== wantEnabled) {
+          cb.checked = wantEnabled;
+          cb.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+      if (!wasOpen) {
+        fireClick($(".sheet-close", stSheet));
+      }
+    } catch { } finally {
+      stSheet.style.visibility = prevVis;
+    }
+    return previousState;
   }
 
   // Mô phỏng nhấn giữ phím di chuyển (w, a, s, d, shift)
   async function holdKeys(keys, durationMs, myRun, stopIfFn = null) {
     checkRun(myRun);
-    lockCameraAutoFollow();
     const sendKey = (type, k) => {
       window.dispatchEvent(
         new KeyboardEvent(type, {
@@ -179,7 +196,7 @@
     };
     try {
       for (const k of keys) sendKey("keydown", k);
-      const step = 90;
+      const step = 60;
       let elapsed = 0;
       while (elapsed < durationMs) {
         checkRun(myRun);
@@ -609,90 +626,110 @@
 
   // 9. Quét lá sân chùa ({ t: "viec", k: "quet" })
   async function runQuetLa(myRun) {
-    const ok = await teleportToPlace(PLACES.SAN_CHUA, "Sân chùa", myRun);
-    if (!ok) return false;
+    const prevAutoCam = setCameraAutoFollow(false);
+    try {
+      const ok = await teleportToPlace(PLACES.SAN_CHUA, "Sân chùa", myRun);
+      if (!ok) return false;
 
-    const quetBtn = await waitFor(() => findActionBtn("Quét lá"), 2000, myRun);
-    if (!quetBtn) return false;
-
-    if (!$(".chore-pill.show")) {
-      quetBtn.click();
-      await sleep(400, myRun);
-    }
-
-    // Kiểm tra thông báo: nếu Do.quet === true thì hôm nay đã nhận công đức quét lá rồi
-    const toast = getToastText();
-    if (toast.includes("gió lại thổi lá rụng")) {
-      log("Quét lá hôm nay đã được ghi nhận công đức từ trước.", "ok");
-      $(".chore-pill.show button")?.click();
-      await sleep(250, myRun);
-      return true;
-    }
-
-    log("Đang tự động di chuyển quét 20 chiếc lá quanh Sân chùa…", "ok");
-    const isSweepingDone = () => !$(".chore-pill.show");
-
-    // Tại điểm dịch chuyển Sân chùa (0, 0, 40) với De.yaw = 0:
-    // w = Bắc (-z), s = Nam (+z), a = Tây (-x), d = Đông (+x)
-    // Di chuyển về góc Tây-Bắc của vùng lá (-6, 34) rồi đi zíc-zắc 7 lượt phủ kín bán kính 6.5m
-    await holdKeys(["a", "Shift"], 820, myRun, isSweepingDone);
-    await holdKeys(["w", "Shift"], 820, myRun, isSweepingDone);
-
-    for (let pass = 0; pass < 7; pass++) {
-      if (isSweepingDone()) break;
-      const dirKey = pass % 2 === 0 ? "d" : "a";
-      await holdKeys([dirKey, "Shift"], 1720, myRun, isSweepingDone);
-      if (isSweepingDone()) break;
-      if (pass < 6) {
-        await holdKeys(["s", "Shift"], 290, myRun, isSweepingDone);
+      // Nếu đang dở lượt quét cũ thì tắt trước để tạo lượt lá mới gọn ngay trước mặt
+      const oldStop = $(".chore-pill.show button");
+      if (oldStop && visible(oldStop)) {
+        fireClick(oldStop);
+        await sleep(200, myRun);
       }
-    }
 
-    // Nếu còn sót 1-2 chiếc lá ở rìa, quét thêm một vòng chéo qua tâm sân
-    if (!isSweepingDone()) {
-      await holdKeys(["w", "a", "Shift"], 950, myRun, isSweepingDone);
-      await holdKeys(["w", "d", "Shift"], 950, myRun, isSweepingDone);
-      await holdKeys(["s", "a", "Shift"], 950, myRun, isSweepingDone);
-    }
+      const quetBtn = await waitFor(() => findActionBtn("Quét lá"), 2000, myRun);
+      if (!quetBtn) return false;
 
-    if (isSweepingDone()) {
-      log("Đã quét sạch sân chùa ({ t: 'viec', k: 'quet' })!", "ok");
-    } else {
-      $(".chore-pill.show button")?.click();
-      log("Đã kết thúc lượt quét sân.", "info");
+      // Khi bấm "Quét lá", QL.start() gọi Math.random() để rải 20 chiếc lá quanh nhân vật.
+      // Gom 20 chiếc lá rải thành một luồng thẳng gọn 1.6m–2.7m ngay trước mặt (hướng Bắc -z)
+      // để nhân vật chỉ cần đi thẳng 1 đường ngắn là quét sạch 20/20 lá, không phải chạy vòng tròn.
+      const origRandom = Math.random;
+      let randStep = 0;
+      try {
+        Math.random = () => {
+          const leafIdx = Math.floor(randStep / 3);
+          const mod = randStep++ % 3;
+          if (mod === 0) return 0.736 + (leafIdx % 5) * 0.007; // Góc hướng thẳng phía trước (-z)
+          if (mod === 1) return 0.02 + (leafIdx % 20) * 0.011; // Khoảng cách 1.6m..2.65m trước mặt
+          return (leafIdx * 0.37) % 1;
+        };
+        fireClick(quetBtn);
+      } finally {
+        Math.random = origRandom;
+      }
+      await sleep(350, myRun);
+
+      // Kiểm tra thông báo: nếu Do.quet === true thì hôm nay đã nhận công đức quét lá rồi
+      const toast = getToastText();
+      if (toast.includes("gió lại thổi lá rụng")) {
+        log("Quét lá hôm nay đã được ghi nhận công đức từ trước.", "ok");
+        fireClick($(".chore-pill.show button"));
+        await sleep(250, myRun);
+        return true;
+      }
+
+      log("Đang bước thẳng tới quét gọn 20 chiếc lá phía trước…", "ok");
+      const isSweepingDone = () => !$(".chore-pill.show");
+
+      // Chỉ cần đi bộ thẳng về phía trước (phím W) ~2.5m là quét hết 20/20 chiếc lá
+      await holdKeys(["w"], 750, myRun, isSweepingDone);
+
+      // Dự phòng nếu còn sót lá (ví dụ tiện ích chưa reload manifest): đi thẳng 3 nhịp nhẹ nhàng, không xoay vòng
+      if (!isSweepingDone()) {
+        await holdKeys(["s"], 1100, myRun, isSweepingDone);
+        await holdKeys(["a"], 550, myRun, isSweepingDone);
+        await holdKeys(["w"], 1200, myRun, isSweepingDone);
+        await holdKeys(["d"], 1100, myRun, isSweepingDone);
+        await holdKeys(["s"], 1200, myRun, isSweepingDone);
+      }
+
+      if (isSweepingDone()) {
+        log("Đã quét sạch 20/20 lá sân chùa ({ t: 'viec', k: 'quet' })!", "ok");
+      } else {
+        fireClick($(".chore-pill.show button"));
+        log("Đã kết thúc lượt quét sân.", "info");
+      }
+      await sleep(400, myRun);
+      return true;
+    } finally {
+      if (prevAutoCam !== null) setCameraAutoFollow(prevAutoCam);
     }
-    await sleep(400, myRun);
-    return true;
   }
 
   // 10. Phóng sinh tại Hồ sen ({ t: "viec", k: "ca" })
   async function runPhongSinh(myRun) {
-    const ok = await teleportToPlace(PLACES.HO_SEN, "Hồ sen · Cầu Duyên", myRun);
-    if (!ok) return false;
+    const prevAutoCam = setCameraAutoFollow(false);
+    try {
+      const ok = await teleportToPlace(PLACES.HO_SEN, "Hồ sen · Cầu Duyên", myRun);
+      if (!ok) return false;
 
-    // Điểm dịch chuyển Hồ sen (35.5, 0, 12) nằm trên Cầu Duyên (vùng bị loại trừ |z - 12| <= 1.7 trong tg()).
-    // Với De.yaw = -Math.PI/2 tại Hồ sen: phím "w" đi về hướng Đông (+x), phím "d" bước về hướng Nam (+z, quay mặt ra mặt hồ).
-    log("Di chuyển ra mép hồ sen để thả cá…", "info");
-    await holdKeys(["w"], 550, myRun);
-    await holdKeys(["d"], 240, myRun);
-    await sleep(250, myRun);
+      // Điểm dịch chuyển Hồ sen (35.5, 0, 12) nằm trên Cầu Duyên (vùng bị loại trừ |z - 12| <= 1.7 trong tg()).
+      // Với De.yaw = -Math.PI/2 tại Hồ sen: phím "w" đi về hướng Đông (+x), phím "d" bước về hướng Nam (+z, quay mặt ra mặt hồ).
+      log("Di chuyển ra mép hồ sen để thả cá…", "info");
+      await holdKeys(["w"], 550, myRun);
+      await holdKeys(["d"], 240, myRun);
+      await sleep(250, myRun);
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const caBtn = await waitFor(() => findActionBtn("Phóng sinh"), 1500, myRun);
-      if (!caBtn) return false;
-      caBtn.click();
-      await sleep(450, myRun);
-      const toast = getToastText();
-      if (toast.includes("lại gần mép hồ")) {
-        await holdKeys(["d"], 280, myRun);
-        await sleep(200, myRun);
-        continue;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const caBtn = await waitFor(() => findActionBtn("Phóng sinh"), 1500, myRun);
+        if (!caBtn) return false;
+        fireClick(caBtn);
+        await sleep(450, myRun);
+        const toast = getToastText();
+        if (toast.includes("lại gần mép hồ")) {
+          await holdKeys(["d"], 280, myRun);
+          await sleep(200, myRun);
+          continue;
+        }
+        log("Đã thả cá phóng sinh tại Hồ sen ({ t: 'viec', k: 'ca' }).", "ok");
+        await sleep(1200, myRun);
+        return true;
       }
-      log("Đã thả cá phóng sinh tại Hồ sen ({ t: 'viec', k: 'ca' }).", "ok");
-      await sleep(1200, myRun);
       return true;
+    } finally {
+      if (prevAutoCam !== null) setCameraAutoFollow(prevAutoCam);
     }
-    return true;
   }
 
   // 11. Vườn Linh Thú: Cho thú ăn ({ t: "emote", e: "gieo" }, { t: "pet-feed" })
@@ -735,7 +772,7 @@
 
   // 13. Gõ mõ tụng kinh ({ t: "mo", n: $h })
   // Lưu ý kỹ thuật: Nút .chant-auto của game gọi this.next(false) nên KHÔNG cộng biến $h.
-  // Phải click trực tiếp .chant-mo (gọi this.next(true) -> $h++) rồi chờ chu kỳ 2 giây của game đẩy gói { t: "mo", n: $h }.
+  // Bấm trực tiếp .chant-mo đủ 108 nhịp theo từng đợt nhanh (auto-click) và ngắt nhịp giữa các đợt để chu kỳ 2 giây đẩy gói { t: "mo", n: $h }.
   async function runMo(myRun) {
     await closeAllModals(myRun);
     let tungBtn = findActionBtn("Tụng kinh");
@@ -746,30 +783,58 @@
     }
     if (!tungBtn) return false;
 
-    tungBtn.click();
+    fireClick(tungBtn);
     const chantPanel = await waitFor(() => $(".chant.open"), 2000, myRun);
     if (!chantPanel) return false;
+
+    // Chọn bài "Niệm Phật" (108 câu) để đếm trọn vòng 108 tiếng mõ
+    const niemPhatTab = $('.chant-tabs button[data-id="niemphat"]', chantPanel);
+    if (niemPhatTab && !niemPhatTab.classList.contains("on")) {
+      fireClick(niemPhatTab);
+      await sleep(150, myRun);
+    }
 
     const moBtn = $(".chant-mo", chantPanel);
     if (!moBtn) return false;
 
-    const knocks = 36;
-    log(`Đang gõ mõ ${knocks} nhịp (tự động gửi theo chu kỳ 2 giây)…`, "ok");
-    for (let i = 0; i < knocks; i++) {
+    const totalKnocks = 108;
+    const burstSize = 18; // 6 đợt x 18 nhịp = 108 nhịp (mỗi gói 2s gửi <= 18 nhịp an toàn)
+    const clickDelayMs = 28; // Tốc độ bấm nhanh kiểu auto-click (~35 nhịp/giây trong mỗi đợt)
+    const burstPauseMs = 1650; // Ngắt nhịp chờ chu kỳ 2s của game gửi gói { t: "mo", n }
+
+    log(
+      `Đang gõ mõ ${totalKnocks} nhịp (chia ${totalKnocks / burstSize} đợt auto-click x ${burstSize} nhịp)…`,
+      "ok"
+    );
+
+    let doneKnocks = 0;
+    while (doneKnocks < totalKnocks) {
       checkRun(myRun);
       if (!$(".chant.open")) break;
-      moBtn.click();
-      await sleep(175, myRun);
+
+      const batch = Math.min(burstSize, totalKnocks - doneKnocks);
+      for (let i = 0; i < batch; i++) {
+        checkRun(myRun);
+        if (!$(".chant.open")) break;
+        fireClick(moBtn);
+        doneKnocks++;
+        await sleep(clickDelayMs, myRun);
+      }
+
+      if (doneKnocks < totalKnocks && $(".chant.open")) {
+        await sleep(burstPauseMs, myRun);
+      }
     }
 
     // Chờ chu kỳ 2 giây của game gửi hết $h còn lại trước khi đóng
     await sleep(2100, myRun);
-    $(".chant.open .chant-close")?.click();
+    fireClick($(".chant.open .chant-close"));
     await sleep(350, myRun);
     return true;
   }
 
   // 14. Lần chuỗi hạt ({ t: "beads", n: Gh })
+  // Lần đủ 108 hạt theo từng đợt nhanh (auto-click) và ngắt nhịp giữa các đợt để chu kỳ 2 giây đẩy gói { t: "beads", n: Gh }.
   async function runBeads(myRun) {
     await closeAllModals(myRun);
     let hatBtn = await waitFor(() => findActionBtn("Tràng hạt"), 1500, myRun);
@@ -784,24 +849,44 @@
     const beadsPanel = await waitFor(() => $(".beads.open"), 2000, myRun);
     if (!beadsPanel) return false;
 
-    const count = 36;
-    log(`Đang lần ${count} hạt tràng hạt (tự động gửi theo chu kỳ 2 giây)…`, "ok");
-    for (let i = 0; i < count; i++) {
+    const totalBeads = 108;
+    const burstSize = 18; // 6 đợt x 18 hạt = 108 hạt
+    const clickDelayMs = 28; // Tốc độ lần hạt nhanh kiểu auto-click (~35 hạt/giây trong mỗi đợt)
+    const burstPauseMs = 1650; // Ngắt nhịp chờ chu kỳ 2s của game gửi gói { t: "beads", n }
+
+    log(
+      `Đang lần ${totalBeads} hạt tràng hạt (chia ${totalBeads / burstSize} đợt auto-click x ${burstSize} hạt)…`,
+      "ok"
+    );
+
+    let doneBeads = 0;
+    while (doneBeads < totalBeads) {
       checkRun(myRun);
       if (!$(".beads.open")) break;
-      beadsPanel.dispatchEvent(
-        new WheelEvent("wheel", {
-          deltaY: 100,
-          bubbles: true,
-          cancelable: true
-        })
-      );
-      await sleep(110, myRun);
+
+      const batch = Math.min(burstSize, totalBeads - doneBeads);
+      for (let i = 0; i < batch; i++) {
+        checkRun(myRun);
+        if (!$(".beads.open")) break;
+        beadsPanel.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: 100,
+            bubbles: true,
+            cancelable: true
+          })
+        );
+        doneBeads++;
+        await sleep(clickDelayMs, myRun);
+      }
+
+      if (doneBeads < totalBeads && $(".beads.open")) {
+        await sleep(burstPauseMs, myRun);
+      }
     }
 
-    // Chờ chu kỳ 2 giây của game đẩy gói { t: "beads", n: Gh }
+    // Chờ chu kỳ 2 giây của game đẩy gói { t: "beads", n: Gh } cuối cùng
     await sleep(2100, myRun);
-    $(".beads.open .beads-close")?.click();
+    fireClick($(".beads.open .beads-close"));
     await sleep(350, myRun);
     return true;
   }
