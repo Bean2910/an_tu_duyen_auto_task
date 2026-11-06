@@ -497,3 +497,84 @@
   font-weight: 600;
   box-shadow: 0 0 8px rgba(229, 188, 114, 0.3);
 }
+
+/* Bảng theo dõi tiến độ & ngưỡng hôm nay */
+.atd-today-box {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(229, 188, 114, 0.18);
+  border-radius: 11px;
+}
+.atd-today-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f6eedb;
+  margin-bottom: 6px;
+}
+.atd-today-head button {
+  background: none;
+  border: none;
+  color: #e5bc72;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 3px;
+  opacity: 0.8;
+  transition: transform 0.2s;
+}
+.atd-today-head button:hover {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+.atd-today-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.atd-today-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.atd-today-item:hover {
+  background: rgba(229, 188, 114, 0.08);
+  border-color: rgba(229, 188, 114, 0.28);
+  transform: translateY(-1px);
+}
+.atd-today-item span {
+  color: #b8aba0;
+}
+.atd-today-item b {
+  font-size: 10.5px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.atd-badge-cap {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+}
+.atd-badge-done {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+}
+.atd-badge-ok {
+  color: #e5bc72;
+  font-size: 9.5px;
+}

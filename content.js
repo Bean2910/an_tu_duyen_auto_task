@@ -47,76 +47,6 @@
     };
   }
 
-  // Hook WebSocket để đón bắt các gói tin lạy của người chơi khác trong điện
-  try {
-    const origSend = WebSocket.prototype.send;
-    WebSocket.prototype.send = function(...args) {
-      activeWs = this;
-      try {
-        const payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
-        if (payload) {
-          if (payload.t === "visit" && payload.zone) {
-            currentZone = payload.zone;
-            lastKnownPlace = payload.zone;
-          }
-          if (payload.t === "emote" && payload.e === "lay") {
-            lastOwnBowTime = Date.now();
-            broadcastSwarmBow();
-          }
-        }
-      } catch {}
-      return origSend.apply(this, args);
-    };
-
-    const origOnMessageDesc = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
-    if (origOnMessageDesc && origOnMessageDesc.set) {
-      Object.defineProperty(WebSocket.prototype, "onmessage", {
-        set(fn) {
-          activeWs = this;
-          const wrapped = function(event) {
-            try {
-              if (typeof event.data === "string") {
-                const msg = JSON.parse(event.data);
-                // Bắt gói tin emote lạy của người khác trong phòng
-                if (msg.t === "emote" && msg.e === "lay") {
-                  const now = Date.now();
-                  const peerId = msg.id || "Người chơi";
-                  peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
-                  peerBowEvents.push({ id: peerId, time: now });
-                  lastPeerBowTime = now;
-
-                  const count = peerBowEvents.length;
-                  if (autoDongTam) {
-                    if (count >= minPeersToBow) {
-                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Có ${count} người cùng lạy trong điện -> Lập tức lạy cùng để tối đa công đức!`, "ok");
-                      if (triggerBowAction()) {
-                        broadcastSwarmBow();
-                        peerBowEvents = [];
-                      }
-                    } else {
-                      log(`[Radar Đồng tâm] Đã có 1 người vừa lạy (${peerId}) · Chờ thêm người để gom sóng (mục tiêu ≥${minPeersToBow} người)…`, "wait");
-                    }
-                  }
-                }
-                // Nhận công đức từ chùa
-                if (msg.t === "merit" && msg.gain) {
-                  log(`✦ Nhận công đức từ chùa: +${msg.gain}`, "ok");
-                }
-              }
-            } catch {}
-            return fn.call(this, event);
-          };
-          return origOnMessageDesc.set.call(this, wrapped);
-        },
-        get() {
-          return origOnMessageDesc.get.call(this);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn("[ATD] WebSocket hook:", err);
-  }
-
   // Danh sách nhiệm vụ đầy đủ khớp với giao thức & kiểm tra trạng thái trong src.js
   const ALL_TASKS = [
     { id: "thoikhoa", label: "Thời khóa", once: true },
@@ -160,8 +90,254 @@
     VUON_HOA: 16
   };
 
+  const todayDateStr = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+
+  function loadDoneOnce() {
+    try {
+      const raw = localStorage.getItem("atd_done_once");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.day === todayDateStr() && Array.isArray(parsed.tasks)) {
+          return new Set(parsed.tasks);
+        }
+      }
+    } catch {}
+    return new Set();
+  }
+
+  function saveDoneOnce() {
+    try {
+      localStorage.setItem("atd_done_once", JSON.stringify({
+        day: todayDateStr(),
+        tasks: Array.from(doneOnce)
+      }));
+    } catch {}
+  }
+
+  function loadServerChores() {
+    try {
+      const raw = localStorage.getItem("atd_server_chores");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.day === todayDateStr()) {
+          return {
+            quet: Boolean(parsed.quet),
+            den: Boolean(parsed.den),
+            ca: Boolean(parsed.ca),
+            tk: Boolean(parsed.tk)
+          };
+        }
+      }
+    } catch {}
+    return { quet: false, den: false, ca: false, tk: false };
+  }
+
+  function saveServerChores() {
+    try {
+      localStorage.setItem("atd_server_chores", JSON.stringify({
+        day: todayDateStr(),
+        quet: Boolean(serverChores.quet),
+        den: Boolean(serverChores.den),
+        ca: Boolean(serverChores.ca),
+        tk: Boolean(serverChores.tk)
+      }));
+    } catch {}
+  }
+
+  const serverChores = loadServerChores();
   const enabledTasks = new Set(ALL_TASKS.map((t) => t.id));
-  const doneOnce = new Set();
+  const doneOnce = loadDoneOnce();
+
+  // Đồng bộ ban đầu nếu serverChores đã lưu
+  if (serverChores.quet) doneOnce.add("quet");
+  if (serverChores.ca) doneOnce.add("ca");
+  if (serverChores.den) doneOnce.add("lamp");
+  if (serverChores.tk) doneOnce.add("thoikhoa");
+
+  function syncServerMessage(msg) {
+    if (!msg || !msg.t) return;
+    let changed = false;
+
+    // 1. Chores từ welcome hoặc chores
+    if (msg.t === "welcome" && msg.chores) {
+      if (typeof msg.chores.quet === "boolean" && serverChores.quet !== msg.chores.quet) {
+        serverChores.quet = msg.chores.quet;
+        changed = true;
+      }
+      if (typeof msg.chores.ca === "boolean" && serverChores.ca !== msg.chores.ca) {
+        serverChores.ca = msg.chores.ca;
+        changed = true;
+      }
+      if (typeof msg.chores.den === "boolean" && serverChores.den !== msg.chores.den) {
+        serverChores.den = msg.chores.den;
+        changed = true;
+      }
+    } else if (msg.t === "chores" && msg.c) {
+      if (typeof msg.c.quet === "boolean" && serverChores.quet !== msg.c.quet) {
+        serverChores.quet = msg.c.quet;
+        changed = true;
+      }
+      if (typeof msg.c.ca === "boolean" && serverChores.ca !== msg.c.ca) {
+        serverChores.ca = msg.c.ca;
+        changed = true;
+      }
+      if (typeof msg.c.den === "boolean" && serverChores.den !== msg.c.den) {
+        serverChores.den = msg.c.den;
+        changed = true;
+      }
+    } else if (msg.t === "merit" && msg.me) {
+      // 2. Merit & Quests từ server
+      if (typeof msg.me.tk === "boolean" && serverChores.tk !== msg.me.tk) {
+        serverChores.tk = msg.me.tk;
+        changed = true;
+      }
+      if (Array.isArray(msg.me.quests)) {
+        for (const q of msg.me.quests) {
+          const isDone = Boolean(q.claimed || (q.have >= q.need));
+          if (!isDone) continue;
+          if (q.id === "quet" || q.id === "leaf") {
+            if (!serverChores.quet) { serverChores.quet = true; changed = true; }
+          } else if (q.id === "ca" || q.id === "fish") {
+            if (!serverChores.ca) { serverChores.ca = true; changed = true; }
+          } else if (q.id === "den" || q.id === "lamp") {
+            if (!serverChores.den) { serverChores.den = true; changed = true; }
+          } else if (q.id === "tk" || q.id === "khoe" || q.id === "thoikhoa") {
+            if (!serverChores.tk) { serverChores.tk = true; changed = true; }
+          } else if (q.id === "tangkinh") {
+            doneOnce.add("tangkinh");
+          } else if (q.id === "bell") {
+            doneOnce.add("bell");
+          } else if (q.id === "garden") {
+            doneOnce.add("garden");
+          }
+        }
+      }
+    }
+
+    if (serverChores.quet && !doneOnce.has("quet")) { doneOnce.add("quet"); changed = true; }
+    if (serverChores.ca && !doneOnce.has("ca")) { doneOnce.add("ca"); changed = true; }
+    if (serverChores.den && !doneOnce.has("lamp")) { doneOnce.add("lamp"); changed = true; }
+    if (serverChores.tk && !doneOnce.has("thoikhoa")) { doneOnce.add("thoikhoa"); changed = true; }
+
+    if (changed) {
+      saveServerChores();
+      saveDoneOnce();
+      try { updateTagUI(); } catch {}
+      try { updateTodayStatsUI(); } catch {}
+    }
+  }
+
+  function queryServerMerit() {
+    try {
+      if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+        activeWs.send(JSON.stringify({ t: "merit" }));
+      }
+    } catch {}
+  }
+
+  // Hook WebSocket để đón bắt các gói tin lạy của người chơi khác trong điện
+  try {
+    const origSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(...args) {
+      activeWs = this;
+      try {
+        const payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
+        if (payload) {
+          if (payload.t === "visit" && payload.zone) {
+            currentZone = payload.zone;
+            lastKnownPlace = payload.zone;
+          }
+          if (payload.t === "emote" && payload.e === "lay") {
+            lastOwnBowTime = Date.now();
+            broadcastSwarmBow();
+          }
+          if (payload.t === "viec") {
+            if (payload.k === "quet") {
+              serverChores.quet = true;
+              doneOnce.add("quet");
+              saveServerChores();
+              saveDoneOnce();
+              try { updateTagUI(); } catch {}
+              try { updateTodayStatsUI(); } catch {}
+            } else if (payload.k === "ca") {
+              serverChores.ca = true;
+              doneOnce.add("ca");
+              saveServerChores();
+              saveDoneOnce();
+              try { updateTagUI(); } catch {}
+              try { updateTodayStatsUI(); } catch {}
+            } else if (payload.k === "den") {
+              serverChores.den = true;
+              doneOnce.add("lamp");
+              saveServerChores();
+              saveDoneOnce();
+              try { updateTagUI(); } catch {}
+              try { updateTodayStatsUI(); } catch {}
+            }
+          }
+          if (payload.t === "tk-done") {
+            serverChores.tk = true;
+            doneOnce.add("thoikhoa");
+            saveServerChores();
+            saveDoneOnce();
+            try { updateTagUI(); } catch {}
+            try { updateTodayStatsUI(); } catch {}
+          }
+        }
+      } catch {}
+      return origSend.apply(this, args);
+    };
+
+    const origOnMessageDesc = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+    if (origOnMessageDesc && origOnMessageDesc.set) {
+      Object.defineProperty(WebSocket.prototype, "onmessage", {
+        set(fn) {
+          activeWs = this;
+          const wrapped = function(event) {
+            try {
+              if (typeof event.data === "string") {
+                const msg = JSON.parse(event.data);
+                syncServerMessage(msg);
+
+                // Bắt gói tin emote lạy của người khác trong phòng
+                if (msg.t === "emote" && msg.e === "lay") {
+                  const now = Date.now();
+                  const peerId = msg.id || "Người chơi";
+                  peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
+                  peerBowEvents.push({ id: peerId, time: now });
+                  lastPeerBowTime = now;
+
+                  const count = peerBowEvents.length;
+                  if (autoDongTam) {
+                    if (count >= minPeersToBow) {
+                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Có ${count} người cùng lạy trong điện -> Lập tức lạy cùng để tối đa công đức!`, "ok");
+                      if (triggerBowAction()) {
+                        broadcastSwarmBow();
+                        peerBowEvents = [];
+                      }
+                    } else {
+                      log(`[Radar Đồng tâm] Đã có 1 người vừa lạy (${peerId}) · Chờ thêm người để gom sóng (mục tiêu ≥${minPeersToBow} người)…`, "wait");
+                    }
+                  }
+                }
+                // Nhận công đức từ chùa
+                if (msg.t === "merit" && msg.gain) {
+                  log(`✦ Nhận công đức từ chùa: +${msg.gain}`, "ok");
+                }
+              }
+            } catch {}
+            return fn.call(this, event);
+          };
+          return origOnMessageDesc.set.call(this, wrapped);
+        },
+        get() {
+          return origOnMessageDesc.get.call(this);
+        }
+      });
+    }
+  } catch (err) {
+    console.warn("[ATD] WebSocket hook:", err);
+  }
 
   let running = false;
   let runId = 0;
@@ -1352,6 +1528,126 @@
     claim: runClaim
   };
 
+  function getGameTodayStats() {
+    try {
+      const today = todayDateStr();
+      const raw = localStorage.getItem("anduyen.today");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.day === today) {
+          return {
+            beads: Number(parsed.beads || 0),
+            bows: Number(parsed.bows || 0),
+            incense: Number(parsed.incense || 0)
+          };
+        }
+      }
+    } catch {}
+    return { beads: 0, bows: 0, incense: 0 };
+  }
+
+  function updateTodayStatsUI() {
+    const grid = $("#atd-today-stats");
+    if (!grid) return;
+
+    const stats = getGameTodayStats();
+    const bowsCap = stats.bows >= 30;
+    const beadsDone = stats.beads >= 108;
+
+    const isQuetDone = Boolean(serverChores.quet || doneOnce.has("quet"));
+    const isCaDone = Boolean(serverChores.ca || doneOnce.has("ca"));
+    const isTkDone = Boolean(serverChores.tk || doneOnce.has("thoikhoa"));
+
+    const items = [
+      {
+        id: "bow",
+        label: "Lạy Phật",
+        val: `${stats.bows} lạy`,
+        badge: bowsCap
+          ? `<span class="atd-badge-cap" title="Đã đạt trần công đức lạy tự do hôm nay (≥30 lạy). Vẫn tính vào tích luỹ 1.000 lạy Thiền trượng & lạy đôi.">Kịch trần (≥30)</span>`
+          : `<span class="atd-badge-ok">${stats.bows}/30</span>`
+      },
+      {
+        id: "beads",
+        label: "Tràng hạt",
+        val: `${stats.beads} hạt`,
+        badge: beadsDone
+          ? `<span class="atd-badge-done" title="Đã trọn chuỗi 108 hạt niệm Phật hôm nay">Đủ 108</span>`
+          : `<span class="atd-badge-ok">${stats.beads}/108</span>`
+      },
+      {
+        id: "incense",
+        label: "Dâng hương",
+        val: `${stats.incense} lượt`,
+        badge: stats.incense >= 3
+          ? `<span class="atd-badge-done">Đủ 3 am/điện</span>`
+          : `<span class="atd-badge-ok">${stats.incense} lượt</span>`
+      },
+      {
+        id: "thoikhoa",
+        label: "Thời khóa",
+        val: isTkDone ? "Đã khóa lễ" : "Chưa làm",
+        badge: isTkDone
+          ? `<span class="atd-badge-done">Xong</span>`
+          : `<span class="atd-badge-ok">Chưa làm</span>`
+      },
+      {
+        id: "quet",
+        label: "Quét lá",
+        val: isQuetDone ? "Đã sạch sân" : "Chưa quét",
+        badge: isQuetDone
+          ? `<span class="atd-badge-done">Đã nhận</span>`
+          : `<span class="atd-badge-ok">Chưa quét</span>`
+      },
+      {
+        id: "ca",
+        label: "Phóng sinh",
+        val: isCaDone ? "Đã thả cá" : "Chưa thả",
+        badge: isCaDone
+          ? `<span class="atd-badge-done">Đã nhận</span>`
+          : `<span class="atd-badge-ok">Chưa thả</span>`
+      }
+    ];
+
+    grid.innerHTML = items.map((item) => `
+      <div class="atd-today-item" data-stat="${item.id}" style="cursor:pointer;" title="Bấm vào để đổi trạng thái Đã làm / Chưa làm">
+        <span>${item.label}</span>
+        <b>${item.val} ${item.badge}</b>
+      </div>
+    `).join("");
+
+    $$(".atd-today-item", grid).forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.stat;
+        if (id === "quet") {
+          const current = Boolean(serverChores.quet || doneOnce.has("quet"));
+          serverChores.quet = !current;
+          if (serverChores.quet) doneOnce.add("quet");
+          else doneOnce.delete("quet");
+          log(`Đã chuyển thủ công Quét lá: ${serverChores.quet ? "Đã nhận" : "Chưa làm"}`, "info");
+        } else if (id === "ca") {
+          const current = Boolean(serverChores.ca || doneOnce.has("ca"));
+          serverChores.ca = !current;
+          if (serverChores.ca) doneOnce.add("ca");
+          else doneOnce.delete("ca");
+          log(`Đã chuyển thủ công Phóng sinh: ${serverChores.ca ? "Đã nhận" : "Chưa làm"}`, "info");
+        } else if (id === "thoikhoa") {
+          const current = Boolean(serverChores.tk || doneOnce.has("thoikhoa"));
+          serverChores.tk = !current;
+          if (serverChores.tk) doneOnce.add("thoikhoa");
+          else doneOnce.delete("thoikhoa");
+          log(`Đã chuyển thủ công Thời khóa: ${serverChores.tk ? "Xong" : "Chưa làm"}`, "info");
+        } else {
+          return;
+        }
+        saveServerChores();
+        saveDoneOnce();
+        updateTagUI();
+        updateTodayStatsUI();
+      });
+    });
+  }
+
   function updateTagUI() {
     for (const t of ALL_TASKS) {
       const el = $(`#atd-panel [data-task="${t.id}"]`);
@@ -1363,6 +1659,7 @@
     if (countEl) {
       countEl.textContent = `(${enabledTasks.size}/${ALL_TASKS.length})`;
     }
+    updateTodayStatsUI();
   }
 
   async function mainLoop(myRun) {
@@ -1391,7 +1688,10 @@
             const ok = await RUNNERS[task.id](myRun);
             if (ok && task.once) {
               doneOnce.add(task.id);
+              saveDoneOnce();
               updateTagUI();
+            } else {
+              updateTodayStatsUI();
             }
           } catch (err) {
             if (err?.message === "__ATD_STOPPED__") throw err;
@@ -1446,7 +1746,14 @@
 
   function resetDailyState() {
     doneOnce.clear();
+    serverChores.quet = false;
+    serverChores.ca = false;
+    serverChores.den = false;
+    serverChores.tk = false;
+    saveServerChores();
+    saveDoneOnce();
     updateTagUI();
+    updateTodayStatsUI();
     log("Đã đặt lại trạng thái các nhiệm vụ 1 lần/ngày.", "info");
   }
 
@@ -1687,6 +1994,13 @@
             </div>
           </div>
         </div>
+        <div class="atd-today-box">
+          <div class="atd-today-head">
+            <span>📊 Tiến độ & Ngưỡng hôm nay</span>
+            <button id="atd-refresh-today" type="button" title="Làm mới tiến độ">↻</button>
+          </div>
+          <div class="atd-today-grid" id="atd-today-stats"></div>
+        </div>
         <div class="atd-actions">
           <button id="atd-start" type="button">▶ Chạy Auto</button>
           <button id="atd-stop" type="button" disabled>■ Dừng</button>
@@ -1754,6 +2068,16 @@
         updateTagUI();
       });
     });
+
+    $("#atd-refresh-today", panel)?.addEventListener("click", () => {
+      queryServerMerit();
+      updateTodayStatsUI();
+      log("Đã gửi yêu cầu đồng bộ tiến độ & ngưỡng từ máy chủ chùa.", "info");
+    });
+
+    updateTagUI();
+    updateTodayStatsUI();
+    setTimeout(queryServerMerit, 1500);
 
     // Trạng thái ban đầu: nếu người dùng chưa mở thì mặc định thu gọn thành nút tròn (#atd-fab)
     const initiallyCollapsed = localStorage.getItem("atd_collapsed") !== "0";
