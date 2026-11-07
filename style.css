@@ -474,9 +474,36 @@
   border-radius: 4px;
 }
 
-/* Nút tùy chọn số lượng người Lạy đồng tâm */
+/* Nút tùy chọn & hộp nhập số lượng người Lạy đồng tâm */
+.atd-peers-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 4px 0 2px;
+  gap: 8px;
+}
+.atd-peers-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.atd-peers-label span {
+  font-size: 11px;
+  color: #d8d3c8;
+}
+.atd-peers-label small {
+  font-size: 9.5px;
+  color: #e5bc72;
+  font-weight: 600;
+}
+.atd-peers-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .atd-dt-opt {
-  padding: 3px 8px;
+  padding: 3px 7px;
   font-size: 11px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
@@ -496,6 +523,54 @@
   border-color: rgba(229, 188, 114, 0.75);
   font-weight: 600;
   box-shadow: 0 0 8px rgba(229, 188, 114, 0.3);
+}
+.atd-num-stepper {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(229, 188, 114, 0.3);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 23px;
+}
+.atd-num-stepper button {
+  background: transparent;
+  border: none;
+  color: #e5bc72;
+  font-size: 13px;
+  font-weight: 700;
+  width: 20px;
+  height: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.atd-num-stepper button:hover {
+  background: rgba(229, 188, 114, 0.25);
+  color: #fff;
+}
+.atd-num-stepper input {
+  width: 28px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.atd-num-stepper input::-webkit-outer-spin-button,
+.atd-num-stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* Bảng theo dõi tiến độ & ngưỡng hôm nay */

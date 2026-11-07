@@ -40,8 +40,20 @@
       const data = event.data;
       if (!data || data.from === TAB_ID) return;
       if (data.type === "SWARM_BOW" && autoDongTam) {
-        if (triggerBowAction()) {
-          log(`[Đồng tâm Swarm] Nhận hiệu lệnh từ tab khác -> Đã lập tức lạy cùng!`, "ok");
+        const now = Date.now();
+        const peerId = `Tab_${data.from}`;
+        peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
+        peerBowEvents.push({ id: peerId, time: now });
+        lastPeerBowTime = now;
+
+        const count = peerBowEvents.length;
+        if (count >= minPeersToBow) {
+          log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người (có Tab Swarm) -> Lập tức lạy cùng!`, "ok");
+          if (triggerBowAction()) {
+            peerBowEvents = [];
+          }
+        } else {
+          log(`[Đồng tâm Swarm] Có ${count}/${minPeersToBow} lượt lạy từ Tab khác · Chờ thêm để đủ ≥${minPeersToBow} người…`, "wait");
         }
       }
     };
@@ -310,13 +322,13 @@
                   const count = peerBowEvents.length;
                   if (autoDongTam) {
                     if (count >= minPeersToBow) {
-                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Có ${count} người cùng lạy trong điện -> Lập tức lạy cùng để tối đa công đức!`, "ok");
+                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người cùng lạy -> Lập tức lạy cùng để tối đa công đức!`, "ok");
                       if (triggerBowAction()) {
                         broadcastSwarmBow();
                         peerBowEvents = [];
                       }
                     } else {
-                      log(`[Radar Đồng tâm] Đã có 1 người vừa lạy (${peerId}) · Chờ thêm người để gom sóng (mục tiêu ≥${minPeersToBow} người)…`, "wait");
+                      log(`[Radar Đồng tâm] Đang có ${count}/${minPeersToBow} người vừa lạy (${peerId}) · Chờ thêm để đủ sóng ≥${minPeersToBow} người…`, "wait");
                     }
                   }
                 }
@@ -849,15 +861,16 @@
       return true;
     }
 
-    log("Chánh điện: Bật radar lắng nghe nhịp lạy đồng tâm từ người khác & Swarm…", "ok");
+    log(`Chánh điện: Bật radar lắng nghe nhịp lạy đồng tâm từ người khác & Swarm (mục tiêu ≥${minPeersToBow} người)…`, "ok");
     const prevBow = lastPeerBowTime;
     const startWait = Date.now();
     let caught = false;
 
-    // Chờ tối đa 8 giây xem có ai trong điện lạy không để bắt nhịp ké
+    // Chờ tối đa 8 giây xem có gom đủ số người trong điện cùng lạy không
     while (Date.now() - startWait < 8000) {
       if (!checkRun(myRun)) return false;
-      if (lastPeerBowTime > prevBow) {
+      const count = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+      if (count >= minPeersToBow || (minPeersToBow === 1 && lastPeerBowTime > prevBow)) {
         caught = true;
         break;
       }
@@ -865,7 +878,12 @@
     }
 
     if (!caught) {
-      log("Chưa có ai lạy trước · Chủ động phát nhịp Lạy & hiệu lệnh Swarm…", "wait");
+      const curCount = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+      if (curCount > 0) {
+        log(`Chưa gom đủ sóng đông người (${curCount}/${minPeersToBow}) · Chủ động phát nhịp Lạy mở đầu & gọi Swarm…`, "wait");
+      } else {
+        log("Chưa có ai lạy trước · Chủ động phát nhịp Lạy & hiệu lệnh Swarm…", "wait");
+      }
       triggerBowAction();
       broadcastSwarmBow();
     }
@@ -2005,12 +2023,23 @@
               </span>
               <span>Bắt nhịp Lạy đồng tâm & Swarm đa tab</span>
             </label>
-            <div class="atd-mini-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:7px;padding:2px 0 1px;">
-              <span style="font-size:11px;color:#d8d3c8;">Canh lạy cùng lúc:</span>
-              <div class="atd-mini-btns" id="atd-dongtam-targets">
-                <button type="button" class="atd-dt-opt ${minPeersToBow === 1 ? 'on' : ''}" data-target="1" title="Có bất kỳ ai lạy là lạy theo ngay">≥1 người</button>
-                <button type="button" class="atd-dt-opt ${minPeersToBow === 2 ? 'on' : ''}" data-target="2" title="Chờ từ 2 người trở lên lạy cùng lúc để tối đa công đức">≥2 người</button>
-                <button type="button" class="atd-dt-opt ${minPeersToBow >= 3 ? 'on' : ''}" data-target="3" title="Chờ đám đông từ 3 người lạy cùng lúc">≥3 người</button>
+            <div class="atd-peers-row">
+              <div class="atd-peers-label">
+                <span>Canh lạy cùng lúc:</span>
+                <small id="atd-dt-status">Mục tiêu: ≥${minPeersToBow} người</small>
+              </div>
+              <div class="atd-peers-ctrl">
+                <div class="atd-mini-btns" id="atd-dongtam-targets">
+                  <button type="button" class="atd-dt-opt ${minPeersToBow === 1 ? 'on' : ''}" data-target="1" title="≥1 người (bất kỳ ai lạy là theo ngay)">1</button>
+                  <button type="button" class="atd-dt-opt ${minPeersToBow === 2 ? 'on' : ''}" data-target="2" title="≥2 người cùng lạy">2</button>
+                  <button type="button" class="atd-dt-opt ${minPeersToBow === 3 ? 'on' : ''}" data-target="3" title="≥3 người cùng lạy">3</button>
+                  <button type="button" class="atd-dt-opt ${minPeersToBow === 5 ? 'on' : ''}" data-target="5" title="≥5 người cùng lạy">5</button>
+                </div>
+                <div class="atd-num-stepper" title="Tùy chỉnh số lượng người canh lạy cùng lúc">
+                  <button type="button" id="atd-dt-dec" title="Giảm 1 người">−</button>
+                  <input type="number" id="atd-dt-input" min="1" max="99" value="${minPeersToBow}" title="Nhập số người cần canh lạy cùng lúc">
+                  <button type="button" id="atd-dt-inc" title="Tăng 1 người">+</button>
+                </div>
               </div>
             </div>
           </div>
@@ -2061,14 +2090,49 @@
       log(autoDongTam ? "Đã bật radar Bắt nhịp Lạy đồng tâm & Swarm." : "Đã tắt Bắt nhịp Lạy đồng tâm.", "info");
     });
 
+    function setMinPeers(val) {
+      const num = Math.max(1, Math.min(99, Math.round(Number(val) || 2)));
+      minPeersToBow = num;
+      try { localStorage.setItem("atd_dt_min", String(num)); } catch {}
+
+      const input = $("#atd-dt-input", panel);
+      if (input && Number(input.value) !== num) input.value = num;
+
+      const status = $("#atd-dt-status", panel);
+      if (status) status.textContent = `Mục tiêu: ≥${num} người`;
+
+      $$(".atd-dt-opt", panel).forEach((b) => {
+        b.classList.toggle("on", Number(b.dataset.target) === num);
+      });
+
+      log(`Mục tiêu Lạy đồng tâm: Đặt canh từ ≥${num} người lạy cùng lúc.`, "ok");
+    }
+
     $$(".atd-dt-opt", panel).forEach((btn) => {
       btn.addEventListener("click", () => {
-        const val = Number(btn.dataset.target || "2");
-        minPeersToBow = val;
-        try { localStorage.setItem("atd_dt_min", String(val)); } catch {}
-        $$(".atd-dt-opt", panel).forEach((b) => b.classList.toggle("on", b === btn));
-        log(`Mục tiêu Lạy đồng tâm: Chờ sóng từ ≥${val} người lạy cùng lúc.`, "ok");
+        setMinPeers(btn.dataset.target);
       });
+    });
+
+    const dtInput = $("#atd-dt-input", panel);
+    if (dtInput) {
+      dtInput.addEventListener("change", () => {
+        setMinPeers(dtInput.value);
+      });
+      dtInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          setMinPeers(dtInput.value);
+          dtInput.blur();
+        }
+      });
+    }
+
+    $("#atd-dt-dec", panel)?.addEventListener("click", () => {
+      setMinPeers(minPeersToBow - 1);
+    });
+
+    $("#atd-dt-inc", panel)?.addEventListener("click", () => {
+      setMinPeers(minPeersToBow + 1);
     });
 
     $("#atd-all", panel).addEventListener("click", () => {
