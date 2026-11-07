@@ -816,12 +816,17 @@
       await sleep(3200, myRun);
     }
 
-    const layBtn = findActionBtn("Lạy");
-    if (layBtn && !layBtn.disabled) {
-      fireClick(layBtn);
-      broadcastSwarmBow();
-      log("Lạy Phật tại Chánh điện ({ t: 'emote', e: 'lay' })…", "ok");
-      await sleep(5800, myRun);
+    // Nếu minPeersToBow > 1 hoặc đang bật Lạy đồng tâm: không lạy lẻ ở đây để tránh lãng phí ngưỡng công đức
+    if (minPeersToBow <= 1 && !enabledTasks.has("dongtam")) {
+      const layBtn = findActionBtn("Lạy");
+      if (layBtn && !layBtn.disabled) {
+        fireClick(layBtn);
+        broadcastSwarmBow();
+        log("Lạy Phật tại Chánh điện ({ t: 'emote', e: 'lay' })…", "ok");
+        await sleep(5800, myRun);
+      }
+    } else {
+      log(`Dâng hương Chánh điện xong · Giữ nhịp lạy để chỉ lạy khi đủ sóng ≥${minPeersToBow} người ở tác vụ Lạy đồng tâm.`, "info");
     }
     return true;
   }
@@ -834,7 +839,7 @@
     // Nếu người dùng CHỈ BẬT DUY NHẤT 1 tác vụ "Lạy đồng tâm" (1/18):
     // Cho nhân vật đứng túc trực yên tại Chánh điện, liên tục lắng nghe người khác lạy & Swarm, KHÔNG dịch chuyển lại
     if (enabledTasks.size === 1 && enabledTasks.has("dongtam")) {
-      log(`Chế độ Túc trực Chánh điện: Đang canh sóng lạy đông người (mục tiêu ≥${minPeersToBow} người lạy cùng lúc)…`, "ok");
+      log(`Chế độ Túc trực Chánh điện: Đang canh sóng lạy đông người (chỉ lạy khi đủ ≥${minPeersToBow} người cùng lạy)…`, "ok");
       setStatus(`Túc trực Chánh điện · Chờ sóng lạy ≥${minPeersToBow} người`);
 
       let waitSeconds = 0;
@@ -848,15 +853,6 @@
           const recent = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
           setStatus(`Túc trực Chánh điện (${waitSeconds}s) · Sóng hiện tại: ${recent}/${minPeersToBow} người`);
         }
-
-        // Tự động lạy 1 nhịp sau mỗi 60 giây nếu chưa có sóng đông người (để vừa tích công đức vừa phát sóng Swarm)
-        if (waitSeconds >= 60) {
-          log("Túc trực 60s: Thực hiện 1 nhịp lạy trang nghiêm & phát sóng Swarm…", "info");
-          triggerBowAction();
-          broadcastSwarmBow();
-          await sleep(5800, myRun);
-          waitSeconds = 0;
-        }
       }
       return true;
     }
@@ -866,8 +862,8 @@
     const startWait = Date.now();
     let caught = false;
 
-    // Chờ tối đa 8 giây xem có gom đủ số người trong điện cùng lạy không
-    while (Date.now() - startWait < 8000) {
+    // Chờ tối đa 12 giây xem có gom đủ số người trong điện cùng lạy không
+    while (Date.now() - startWait < 12000) {
       if (!checkRun(myRun)) return false;
       const count = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
       if (count >= minPeersToBow || (minPeersToBow === 1 && lastPeerBowTime > prevBow)) {
@@ -877,30 +873,25 @@
       await sleep(400, myRun);
     }
 
-    if (!caught) {
+    if (caught) {
       const curCount = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
-      if (curCount > 0) {
-        log(`Chưa gom đủ sóng đông người (${curCount}/${minPeersToBow}) · Chủ động phát nhịp Lạy mở đầu & gọi Swarm…`, "wait");
-      } else {
-        log("Chưa có ai lạy trước · Chủ động phát nhịp Lạy & hiệu lệnh Swarm…", "wait");
-      }
-      triggerBowAction();
-      broadcastSwarmBow();
-    }
-
-    // Chờ trọn 1 nhịp lạy (5.6s)
-    await sleep(5800, myRun);
-
-    // Tam bái (3 lạy liên tiếp) để tăng tối đa cơ hội khớp nhịp đồng tâm với nhiều người
-    for (let bai = 2; bai <= 3; bai++) {
-      if (!checkRun(myRun)) return false;
-      log(`Thực hiện tiếp nhịp lạy trang nghiêm #${bai}/3…`, "ok");
+      log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã khớp sóng ${curCount >= minPeersToBow ? curCount : minPeersToBow} người cùng lạy -> Thực hiện lạy đồng tâm!`, "ok");
       triggerBowAction();
       broadcastSwarmBow();
       await sleep(5800, myRun);
+
+      if (minPeersToBow <= 2) {
+        log("Thực hiện thêm nhịp lạy đồng tâm #2…", "ok");
+        triggerBowAction();
+        broadcastSwarmBow();
+        await sleep(5800, myRun);
+      }
+      log("Hoàn tất chuỗi lạy đồng tâm.", "ok");
+    } else {
+      const curCount = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+      log(`Chưa gom đủ sóng đông người (hiện có ${curCount}/${minPeersToBow} người) · Bỏ qua lượt này để bảo toàn số lạy, không lạy lẻ khi chưa đủ người.`, "info");
     }
 
-    log("Hoàn tất chuỗi Tam bái đồng tâm.", "ok");
     return true;
   }
 
