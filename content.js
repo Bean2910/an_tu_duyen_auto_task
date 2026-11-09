@@ -7,79 +7,90 @@
   const currentCloneId = urlParams.get("clone");
   const isCloneTab = Boolean(currentCloneId);
 
+  // Sinh UUID RFC4122 v4 chuẩn 36 ký tự (hợp lệ cho backend validator)
+  function generateStandardUUID() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  let cloneTabCid = null;
+  const cloneMonkName = isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì";
+
   if (isCloneTab) {
     try {
-      const prefix = `atd_clone_${currentCloneId}_`;
+      const cloneKey = `atd_clone_uuid_${currentCloneId}`;
+      let storedCid = sessionStorage.getItem(cloneKey);
+      if (!storedCid || storedCid.length !== 36 || storedCid.startsWith("cid_")) {
+        storedCid = generateStandardUUID();
+        try { sessionStorage.setItem(cloneKey, storedCid); } catch {}
+      }
+      cloneTabCid = storedCid;
+
+      const robes = ["nau", "lam", "xam"];
+      const monkRobe = robes[(Number(currentCloneId) - 1) % robes.length] || "nau";
+      const cloneProfileObj = {
+        name: `Đệ tử #${currentCloneId}`,
+        kind: "tieu",
+        robe: monkRobe,
+        skin: 1,
+        bio: `Đệ tử trợ lực #${currentCloneId}`,
+        beads: "go",
+        cushion: "vang",
+        phapkhi: "mo"
+      };
+
       const origGet = Storage.prototype.getItem;
       const origSet = Storage.prototype.setItem;
       const origRemove = Storage.prototype.removeItem;
 
-      // Đảm bảo tạo ngay 1 CID và Profile độc lập trong sessionStorage
-      let cloneCid = sessionStorage.getItem(prefix + "anduyen.cid");
-      if (!cloneCid) {
-        cloneCid = "cid_clone_" + currentCloneId + "_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
-        sessionStorage.setItem(prefix + "anduyen.cid", cloneCid);
-      }
-
-      let cloneProfile = sessionStorage.getItem(prefix + "anduyen.profile");
-      if (!cloneProfile) {
-        const monkNames = ["Tiểu Lành", "Tiểu An", "Tiểu Tịnh", "Tiểu Trí", "Tiểu Tuệ", "Tiểu Đức", "Tiểu Phúc", "Tiểu Nhân", "Tiểu Nghĩa", "Tiểu Hòa"];
-        const randomName = monkNames[(Number(currentCloneId) - 1) % monkNames.length] || `Đệ tử #${currentCloneId}`;
-        const robes = ["nau", "lam", "xam"];
-        const randomRobe = robes[(Number(currentCloneId) - 1) % robes.length];
-        cloneProfile = JSON.stringify({
-          name: randomName,
-          kind: "tieu",
-          robe: randomRobe,
-          skin: 1,
-          bio: `Đệ tử trợ lực #${currentCloneId}`,
-          beads: "go",
-          cushion: "vang",
-          phapkhi: "mo"
-        });
-        sessionStorage.setItem(prefix + "anduyen.profile", cloneProfile);
-      }
-
-      const isolatedKeys = new Set([
-        "anduyen.cid",
-        "anduyen.profile",
-        "anduyen.adopt",
-        "anduyen.today",
-        "anduyen.bag.xam",
-        "anduyen.bag.words",
-        "atd_tasks",
-        "atd_done_once"
-      ]);
-
       Storage.prototype.getItem = function(key) {
-        if (isolatedKeys.has(key)) {
-          const val = sessionStorage.getItem(prefix + key);
-          if (val !== null) return val;
+        if (key === "anduyen.cid") {
+          return cloneTabCid;
+        }
+        if (key === "anduyen.profile") {
+          return JSON.stringify(cloneProfileObj);
+        }
+        if (key === "anduyen.adopt") {
+          return "0";
         }
         return origGet.apply(this, arguments);
       };
 
       Storage.prototype.setItem = function(key, val) {
-        if (isolatedKeys.has(key)) {
-          return sessionStorage.setItem(prefix + key, String(val));
+        if (key === "anduyen.cid") {
+          return; // Giữ nguyên UUID riêng của tab Clone
         }
         return origSet.apply(this, arguments);
       };
 
-      Storage.prototype.removeItem = function(key) {
-        if (isolatedKeys.has(key)) {
-          return sessionStorage.removeItem(prefix + key);
-        }
-        return origRemove.apply(this, arguments);
-      };
-
-      console.log(`[AutoTask] Đã kích hoạt Clone Tab #${currentCloneId} · CID độc lập: ${cloneCid}`);
+      console.log(`[AutoTask] Đã kích hoạt Clone Tab #${currentCloneId} · UUID độc lập: ${cloneTabCid}`);
       const origDocTitle = document.title;
-      document.title = `[Clone #${currentCloneId}] ${origDocTitle || "An Tự Duyên"}`;
+      document.title = `[Đệ tử #${currentCloneId}] ${origDocTitle || "An Tự Duyên"}`;
     } catch (e) {
       console.warn("[AutoTask] Clone storage hook error:", e);
     }
   }
+
+  // Tự động bỏ qua / bấm "Dùng ở đây" nếu gặp thông báo "Chùa đang mở ở nơi khác"
+  try {
+    const bannedObserver = new MutationObserver(() => {
+      const bannedEl = document.querySelector(".banned");
+      if (bannedEl) {
+        const btn = bannedEl.querySelector("button");
+        if (btn) {
+          console.log("[AutoTask] Tự động nhấn 'Dùng ở đây' trên tab Clone...");
+          btn.click();
+        }
+      }
+    });
+    bannedObserver.observe(document.documentElement, { childList: true, subtree: true });
+  } catch {}
 
   // --- HỆ THỐNG ĐỒNG BỘ LẠY ĐỒNG TÂM & BẮT NHỊP WEBSOCKET SWARM ---
   const TAB_ID = Math.random().toString(36).slice(2, 8);
@@ -92,37 +103,105 @@
   let lastKnownPlace = "";
   let peerBowEvents = [];
 
-  // Vai trò Swarm: 'master' (Tab Chủ trì / Nhạc trưởng) hoặc 'follower' (Tab Trợ lực / Đệ tử)
+  // Vai trò Swarm: 'master' (Tab Chủ trì) hoặc 'follower' (Tab Trợ lực)
   let swarmRole = sessionStorage.getItem("atd_swarm_role") || (isCloneTab ? "follower" : "master");
   let minPeersToBow = swarmRole === "follower" ? 1 : Number(localStorage.getItem("atd_dt_min") || "5");
-  let activeSwarmPeers = new Map(); // from -> { role, time }
+  let activeSwarmPeers = new Map(); // from -> { role, cloneId, name, time }
   let lastLandedCraneTime = 0;
   let lastHacData = null;
+
+  // Thực hiện động tác lạy trực tiếp của Tab này
+  function triggerDirectBow() {
+    const now = Date.now();
+    lastOwnBowTime = now;
+    let clicked = false;
+    const layBtn = findActionBtn("Lạy");
+    if (layBtn && !layBtn.disabled) {
+      fireClick(layBtn);
+      clicked = true;
+    } else if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      try {
+        activeWs.send(JSON.stringify({ t: "emote", e: "lay" }));
+        clicked = true;
+      } catch {}
+    }
+    return clicked;
+  }
 
   function triggerBowAction() {
     const now = Date.now();
     if (now - lastOwnBowTime < 4800) return false;
-
-    // Chỉ lạy khi nhân vật đang đứng ở nơi có nút Lạy (Chánh điện, Quan Âm, Nguyệt Lão, Bảo Tháp)
-    const layBtn = findActionBtn("Lạy");
-    if (!layBtn || layBtn.disabled) return false;
-
-    lastOwnBowTime = now;
-    fireClick(layBtn);
-
-    // Nếu tab này là Chủ trì (Master) -> Lập tức phát lệnh Lạy đồng loạt cho tất cả các Tab Trợ lực!
-    if (swarmRole === "master") {
-      broadcastMasterBowCommand();
-    }
-    return true;
+    return triggerDirectBow();
   }
 
-  function broadcastMasterBowCommand() {
+  // --- QUY TRÌNH PHỐI HỢP: ĐỆ TỬ LẠY TRƯỚC -> BÁO VỀ -> CHỦ TRÌ LẠY THEO ---
+  let isCoordinatingBow = false;
+  let pendingBowSession = null; // { sessionId, acks: Map<from, name>, startTime }
+
+  async function executeMasterDongTamBow() {
+    if (isCoordinatingBow) return false;
+    const now = Date.now();
+    if (now - lastOwnBowTime < 4800) {
+      log(`⏳ Vừa lạy xong, chờ giãn cách (~${Math.ceil((4800 - (now - lastOwnBowTime)) / 1000)}s) để phát động đợt lạy mới…`, "wait");
+      return false;
+    }
+
+    isCoordinatingBow = true;
+    const sessionId = "bow_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const followerCount = getSwarmFollowerCount();
+
+    log(`👑 [Chủ trì] PHÁT ĐỘNG LẠY ĐỒNG TÂM: Lệnh cho ${followerCount > 0 ? followerCount : "các"} đệ tử Trợ lực LẠY TRƯỚC!…`, "step");
+
+    pendingBowSession = {
+      sessionId: sessionId,
+      acks: new Map(),
+      startTime: Date.now()
+    };
+
+    // 1. Master phát tin nhắn CLONES_BOW_FIRST qua BroadcastChannel
     if (swarmChannel) {
       try {
-        swarmChannel.postMessage({ type: "MASTER_BOW_COMMAND", from: TAB_ID, time: Date.now() });
-      } catch {}
+        swarmChannel.postMessage({
+          type: "CLONES_BOW_FIRST",
+          from: TAB_ID,
+          sessionId: sessionId,
+          time: Date.now()
+        });
+      } catch (e) {
+        console.warn("[AutoTask] Swarm postMessage error:", e);
+      }
     }
+
+    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~850ms, hoặc khi đủ acks và đã trôi qua ít nhất 450ms)
+    const waitLimit = 850;
+    const startWait = Date.now();
+    while (Date.now() - startWait < waitLimit) {
+      const elapsed = Date.now() - startWait;
+      if (followerCount > 0 && pendingBowSession.acks.size >= followerCount && elapsed >= 450) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 60));
+    }
+
+    const ackCount = pendingBowSession.acks.size;
+    if (ackCount > 0) {
+      const names = Array.from(pendingBowSession.acks.values()).join(", ");
+      log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${ackCount} đệ tử: [${names}] đã lạy trước!`, "ok");
+    } else {
+      log(`⚠️ [Chủ trì] Chưa nhận phản hồi từ đệ tử (có thể chưa mở tab Clone) · Chủ trì vẫn tiến hành lạy…`, "wait");
+    }
+
+    // 3. Chủ trì lạy theo ngay khi các đệ tử đang ở giữa nhịp lạy (~5.6s) trên server
+    log(`👑 [Chủ trì] Chủ trì lạy ngay để hợp nhất Đồng Tâm (≥${ackCount + 1} người cùng lạy)!`, "ok");
+    triggerDirectBow();
+    broadcastSwarmBow();
+
+    setTimeout(() => {
+      isCoordinatingBow = false;
+      pendingBowSession = null;
+    }, 4800);
+
+    return true;
   }
 
   function broadcastSwarmBow() {
@@ -136,49 +215,65 @@
   function broadcastSwarmHeartbeat() {
     if (swarmChannel) {
       try {
-        swarmChannel.postMessage({ type: "SWARM_HEARTBEAT", from: TAB_ID, role: swarmRole, time: Date.now() });
+        swarmChannel.postMessage({
+          type: "SWARM_HEARTBEAT",
+          from: TAB_ID,
+          role: swarmRole,
+          cloneId: currentCloneId || null,
+          name: isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì",
+          time: Date.now()
+        });
       } catch {}
     }
   }
 
-  setInterval(broadcastSwarmHeartbeat, 3000);
-  setTimeout(broadcastSwarmHeartbeat, 500);
+  setInterval(broadcastSwarmHeartbeat, 2500);
+  setTimeout(broadcastSwarmHeartbeat, 400);
 
-  function getSwarmFollowerCount() {
+  function getSwarmFollowers() {
     const now = Date.now();
-    let followers = 0;
+    const list = [];
     for (const [id, peer] of activeSwarmPeers.entries()) {
       if (now - peer.time <= 7500 && peer.role === "follower") {
-        followers++;
+        list.push({ id, cloneId: peer.cloneId, name: peer.name });
       }
     }
-    return followers;
+    return list;
+  }
+
+  function getSwarmFollowerCount() {
+    return getSwarmFollowers().length;
   }
 
   function updateSwarmInfoUI() {
     const badge = $("#atd-role-badge");
     if (badge) {
       badge.className = `atd-role-badge ${swarmRole}`;
-      badge.textContent = swarmRole === "master" ? "👑 Chủ trì (Master)" : "🤝 Trợ lực (Follower)";
+      badge.textContent = swarmRole === "master" ? "👑 Chủ trì (Master)" : `🤝 Trợ lực [Đệ tử #${currentCloneId || '?'}]`;
     }
     const statusBar = $("#atd-swarm-status-bar");
     if (!statusBar) return;
 
     if (swarmRole === "master") {
       const followers = getSwarmFollowerCount();
+      const followerList = getSwarmFollowers();
       const totalSquad = followers + 1;
       const isEnough = totalSquad >= minPeersToBow;
+      const names = followerList.map((f) => f.name || `Đệ tử #${f.cloneId || '?'}`).join(", ");
       statusBar.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-          <span>👥 Đang kết nối: <b style="color:#34d399;">${followers}</b> đệ tử trợ lực (Tổng đoàn: <b>${totalSquad}</b> ng)</span>
-          <span style="color:${isEnough ? '#34d399' : '#e5bc72'}; font-weight:600; font-size:10.5px;">
-            ${isEnough ? '✅ Đủ mốc ≥' + minPeersToBow : '⏳ Chờ thêm để đủ ≥' + minPeersToBow}
-          </span>
+        <div style="display:flex; flex-direction:column; gap:3px; width:100%;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span>👥 Đang liên kết: <b style="color:#34d399;">${followers}</b> đệ tử trợ lực (Tổng đoàn: <b>${totalSquad}</b> ng)</span>
+            <span style="color:${isEnough ? '#34d399' : '#e5bc72'}; font-weight:600; font-size:10px;">
+              ${isEnough ? '✅ Đủ mốc ≥' + minPeersToBow : '⏳ Chờ thêm để đủ ≥' + minPeersToBow}
+            </span>
+          </div>
+          ${followers > 0 ? `<div style="font-size:10px; color:#a7f3d0; opacity:0.9;">📋 Danh sách: ${names}</div>` : ''}
         </div>
       `;
     } else {
       statusBar.innerHTML = `
-        <span style="color:#d1fae5;">🤝 Đang túc trực Chánh điện · Chờ lệnh lạy đồng loạt từ Tab Chủ trì</span>
+        <span style="color:#d1fae5;">🤝 Đệ tử #${currentCloneId || 'Trợ lực'} · Túc trực Chánh điện · Chờ lệnh Lạy trước từ Tab Chủ trì</span>
       `;
     }
   }
@@ -211,31 +306,61 @@
 
       // 1. Nhận nhịp tim từ các tab trong Swarm
       if (data.type === "SWARM_HEARTBEAT") {
-        activeSwarmPeers.set(data.from, { role: data.role, time: now });
+        activeSwarmPeers.set(data.from, {
+          role: data.role,
+          cloneId: data.cloneId,
+          name: data.name,
+          time: now
+        });
         updateSwarmInfoUI();
         return;
       }
 
-      // 2. Tab Trợ lực (Follower) nhận lệnh LẠY trực tiếp từ Tab Chủ trì (Master)
-      if (data.type === "MASTER_BOW_COMMAND") {
+      // 2. Tab Trợ lực (Follower) nhận lệnh LẠY TRƯỚC từ Tab Chủ trì (Master)
+      if (data.type === "CLONES_BOW_FIRST") {
         if (swarmRole === "follower") {
-          log("👑 Nhận lệnh Lạy từ Tab Chủ trì (Master) -> Lập tức lạy cùng!", "ok");
-          triggerBowAction();
+          log("👑 [Trợ lực] Nhận lệnh từ Chủ trì: Đệ tử lập tức lạy trước để dâng nhịp!", "step");
+          const bowed = triggerBowAction();
+          const myName = `Đệ tử #${currentCloneId || "Trợ lực"}`;
+
+          // Báo tín hiệu về ngay cho Chủ trì
+          try {
+            swarmChannel.postMessage({
+              type: "CLONE_BOWED_ACK",
+              from: TAB_ID,
+              cloneId: currentCloneId,
+              name: myName,
+              sessionId: data.sessionId,
+              bowed: bowed,
+              time: Date.now()
+            });
+          } catch {}
+          log(`📡 [Trợ lực] Đã lạy xong -> Báo tín hiệu về Chủ trì thành công!`, "ok");
         }
         return;
       }
 
-      // 3. Xử lý sóng lạy đồng tâm từ các tab khác
+      // 3. Tab Chủ trì nhận tín hiệu ACK từ các Tab Trợ lực
+      if (data.type === "CLONE_BOWED_ACK") {
+        if (swarmRole === "master" && pendingBowSession && pendingBowSession.sessionId === data.sessionId) {
+          const cloneName = data.name || `Đệ tử #${data.cloneId || "Trợ lực"}`;
+          if (!pendingBowSession.acks.has(data.from)) {
+            pendingBowSession.acks.set(data.from, cloneName);
+            log(`📥 [Chủ trì] Nhận tín hiệu trợ lực: ${cloneName} đã lạy (${pendingBowSession.acks.size}/${getSwarmFollowerCount() || "?"})`, "info");
+          }
+        }
+        return;
+      }
+
+      // 4. Xử lý sóng lạy đồng tâm từ các tab khác ngoài Swarm hoặc nhịp lạy chung
       if (data.type === "SWARM_BOW" && autoDongTam) {
         const peerId = `Tab_${data.from}`;
         peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
         peerBowEvents.push({ id: peerId, time: now });
         lastPeerBowTime = now;
 
-        // Nếu là Tab Trợ lực: luôn sẵn sàng lạy theo nhịp
         if (swarmRole === "follower") {
-          triggerBowAction();
-          return;
+          return; // Follower chỉ lạy khi có lệnh CLONES_BOW_FIRST từ Chủ trì
         }
 
         const count = peerBowEvents.length;
@@ -259,18 +384,18 @@
     targetUrl.searchParams.set("clone", String(id));
     const curRoom = targetUrl.searchParams.get("phong");
     if (!curRoom) {
-      targetUrl.searchParams.set("phong", "chua1");
+      targetUrl.searchParams.set("phong", "chua-1");
     }
     const win = window.open(targetUrl.toString(), "_blank");
     if (!win) {
-      log(`⚠️ Trình duyệt chặn Popup! Hãy bấm biểu tượng 🚫 "Cửa sổ bật lên bị chặn" ở góc phải thanh địa chỉ Chrome và chọn "Luôn cho phép" nhé!`, "warn");
+      log(`⚠️ Trình duyệt chặn Popup! Hãy bấm biểu tượng 🚫 "Cửa sổ bật lên bị chặn" ở góc phải thanh URL và chọn "Luôn cho phép", hoặc bấm nút mở lẻ [#${id}] ở dưới nhé!`, "warn");
     } else {
-      log(`👥 Đã mở Tab Clone #${id} (CID độc lập) · Tự động vào Chánh điện lạy cùng!`, "ok");
+      log(`👥 Đã mở Tab Trợ lực [Đệ tử #${id}] · Tự động vào Chánh điện túc trực lạy trợ lực!`, "ok");
     }
   }
 
-  function openMultipleClones(total = 3) {
-    log(`🚀 Đang mở ${total} Tab Clone vào Chánh điện (Nếu chỉ mở 1 tab, hãy bấm biểu tượng Cho phép Popup trên thanh địa chỉ hoặc bấm nút "+1 Clone" 4 lần nhé)…`, "step");
+  function openMultipleClones(total = 4) {
+    log(`🚀 Đang mở ${total} Tab Trợ lực vào Chánh điện… (Nếu Chrome chỉ mở 1 tab, hãy bấm Cho phép Popup trên thanh URL hoặc bấm các nút [#1, #2, #3, #4] bên dưới)`, "step");
     for (let i = 1; i <= total; i++) {
       openNewCloneTab(i);
     }
@@ -549,17 +674,10 @@
         if (payload) {
           // BẮT BUỘC ĐẢM BẢO CID KHÔNG TRÙNG LẶP CHO CLONE TAB ĐỂ SERVER KHÔNG BÁO "Chùa đang mở ở nơi khác"
           if (payload.t === "hello" && isCloneTab) {
-            let cloneCid = sessionStorage.getItem(`atd_clone_${currentCloneId}_anduyen.cid`);
-            if (!cloneCid) {
-              cloneCid = "cid_clone_" + currentCloneId + "_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
-              sessionStorage.setItem(`atd_clone_${currentCloneId}_anduyen.cid`, cloneCid);
-            }
-            payload.cid = cloneCid;
-            if (payload.name && !payload.name.includes("#")) {
-              payload.name = payload.name + ` #${currentCloneId}`;
-            }
+            payload.cid = cloneTabCid;
+            payload.name = `Đệ tử #${currentCloneId}`;
             args[0] = JSON.stringify(payload);
-            console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct CID:`, cloneCid, "Name:", payload.name);
+            console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct UUID:`, cloneTabCid, "Name:", payload.name);
           }
           if (payload.t === "lv-xuong") {
             lastLandedCraneTime = Date.now();
@@ -1340,10 +1458,11 @@
 
           // NẾU ĐOÀN SWARM ĐÃ CÓ ĐỦ QUÂN SỐ (1 Master + Followers >= minPeersToBow):
           // Master tự động dẫn đầu phát động nhịp lạy đồng loạt mỗi 12 giây!
+          // Đệ tử lạy trước -> báo tín hiệu về -> Master lạy sau để tối đa công đức!
           if (totalSquad >= minPeersToBow && now - lastSquadLeadBowTime >= 12000 && now - lastOwnBowTime >= 5000) {
-            log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người -> Chủ trì phát động nhịp lạy đồng tâm!`, "ok");
+            log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người -> Chủ trì phát lệnh đệ tử lạy trước để gặt trọn công đức Đồng Tâm!`, "ok");
             lastSquadLeadBowTime = now;
-            triggerBowAction();
+            await executeMasterDongTamBow();
           }
 
           if (waitSeconds % 4 === 0) {
@@ -1351,7 +1470,7 @@
             setStatus(`👑 Chủ trì (${waitSeconds}s) · Đoàn: ${totalSquad} ng · Sóng: ${recent}/${minPeersToBow}`);
           }
         } else {
-          // Tab Follower: Túc trực Chánh điện chờ lệnh
+          // Tab Follower: Túc trực Chánh điện chờ lệnh từ Chủ trì
           if (waitSeconds % 5 === 0) {
             setStatus(`🤝 Trợ lực (${waitSeconds}s) · Túc trực Chánh điện chờ lệnh Chủ trì`);
           }
@@ -1399,12 +1518,20 @@
     if (caught) {
       const curCount = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
       log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã khớp sóng ${curCount >= minPeersToBow ? curCount : minPeersToBow} người cùng lạy -> Thực hiện lạy đồng tâm!`, "ok");
-      triggerBowAction();
+      if (swarmRole === "master") {
+        await executeMasterDongTamBow();
+      } else {
+        triggerBowAction();
+      }
       await sleep(5800, myRun);
 
       if (minPeersToBow <= 2) {
         log("Thực hiện thêm nhịp lạy đồng tâm #2…", "ok");
-        triggerBowAction();
+        if (swarmRole === "master") {
+          await executeMasterDongTamBow();
+        } else {
+          triggerBowAction();
+        }
         await sleep(5800, myRun);
       }
       log("Hoàn tất chuỗi lạy đồng tâm.", "ok");
@@ -2902,18 +3029,30 @@
             </div>
             <div class="atd-clone-ctrl-box" id="atd-clone-ctrl-box">
               <div class="atd-clone-title">
-                <span>👥 <b>Nhân bản Tab Clone (Swarm đa tab)</b>:</span>
+                <span>👥 <b>Nhân bản Tab Trợ lực (Swarm 4 Clone)</b>:</span>
               </div>
               <div class="atd-clone-btns">
-                <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab Clone mới độc lập danh tính để cùng lạy">
+                <button type="button" class="atd-clone-btn highlight" id="atd-btn-add-4clones" title="Mở nhanh 4 tab Clone tự động vào Chánh điện túc trực lạy trợ lực">
+                  🚀 Mở 4 Clone
+                </button>
+                <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab Clone mới">
                   👥 +1 Clone
                 </button>
-                <button type="button" class="atd-clone-btn highlight" id="atd-btn-add-3clones" title="Mở nhanh 3 tab Clone tự vào Chánh điện túc trực lạy">
-                  🚀 Mở 3 Clone
+                <button type="button" class="atd-clone-btn lead" id="atd-btn-lead-bow" title="Phát lệnh 4 đệ tử lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
+                  🙏 Phát động Lạy (Clones trước)
                 </button>
-                <button type="button" class="atd-clone-btn lead" id="atd-btn-lead-bow" title="Phát lệnh cho toàn bộ các tab Clone trong Chánh điện cùng lạy ngay lập tức">
-                  🙏 Lạy cả đoàn
-                </button>
+              </div>
+              <div class="atd-clone-mini-row">
+                <span>Mở lẻ từng Tab:</span>
+                <div class="atd-clone-mini-btns">
+                  <button type="button" class="atd-clone-mini-btn" data-clone="1" title="Mở Tab Trợ lực [Đệ tử #1]">#1</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="2" title="Mở Tab Trợ lực [Đệ tử #2]">#2</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="3" title="Mở Tab Trợ lực [Đệ tử #3]">#3</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="4" title="Mở Tab Trợ lực [Đệ tử #4]">#4</button>
+                </div>
+              </div>
+              <div class="atd-clone-tip">
+                💡 <i>Mẹo Chrome:</i> Nếu chỉ mở 1 tab, hãy bấm biểu tượng 🚫 <b>"Cửa sổ bật lên bị chặn"</b> ở góc phải thanh địa chỉ (URL) ➔ chọn <b>"Luôn cho phép"</b>, hoặc bấm mở lẻ từng tab [#1, #2, #3, #4] ở trên nhé!
               </div>
             </div>
             <div class="atd-hac-quick-box" id="atd-hac-quick-box">
@@ -3059,19 +3198,29 @@
     if (btnHacDua) {
       btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
     }
+    const btnAdd4Clones = $("#atd-btn-add-4clones", panel);
+    if (btnAdd4Clones) {
+      btnAdd4Clones.addEventListener("click", () => openMultipleClones(4));
+    }
     const btnAddClone = $("#atd-btn-add-clone", panel);
     if (btnAddClone) {
       btnAddClone.addEventListener("click", () => openNewCloneTab());
     }
-    const btnAdd3Clones = $("#atd-btn-add-3clones", panel);
-    if (btnAdd3Clones) {
-      btnAdd3Clones.addEventListener("click", () => openMultipleClones(3));
-    }
+    $$(".atd-clone-mini-btn", panel).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cId = Number(btn.dataset.clone);
+        openNewCloneTab(cId);
+      });
+    });
     const btnLeadBow = $("#atd-btn-lead-bow", panel);
     if (btnLeadBow) {
       btnLeadBow.addEventListener("click", () => {
-        log("👑 Tab Chủ trì phát động lạy đồng loạt cho toàn đoàn Swarm…", "ok");
-        triggerBowAction();
+        if (swarmRole === "master") {
+          executeMasterDongTamBow();
+        } else {
+          log("🤝 Tab Trợ lực: Đang thực hiện lạy...", "ok");
+          triggerBowAction();
+        }
       });
     }
     const btnRoleMaster = $("#atd-role-btn-master", panel);
