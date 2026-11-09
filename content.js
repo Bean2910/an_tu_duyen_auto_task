@@ -38,7 +38,7 @@
         name: `Đệ tử #${currentCloneId}`,
         kind: "tieu",
         robe: monkRobe,
-        skin: 1,
+        skin: "dong",
         bio: `Đệ tử trợ lực #${currentCloneId}`,
         beads: "go",
         cushion: "vang",
@@ -3304,12 +3304,24 @@
       autoDongTam = true;
       minPeersToBow = 1;
       updateTagUI();
-      log(`[Clone #${currentCloneId}] Đã nhận diện Tab Clone. Chờ 3.5s để tự động di chuyển vào Chánh điện túc trực lạy cùng…`, "ok");
-      setTimeout(() => {
-        if (!running) {
-          start();
+      log(`[Đệ tử #${currentCloneId}] Đã nhận diện Tab Clone. Đang đợi cổng chùa mở hoàn tất…`, "wait");
+
+      const checkLoadedInterval = setInterval(() => {
+        const loadingEl = document.getElementById("loading");
+        const isLoaded = !loadingEl || loadingEl.classList.contains("done");
+        if (isLoaded) {
+          clearInterval(checkLoadedInterval);
+          log(`[Đệ tử #${currentCloneId}] Cổng chùa đã mở! Tự động vào Chánh điện túc trực lạy trợ lực Chủ trì…`, "ok");
+          setTimeout(() => {
+            if (!running) {
+              start();
+            }
+          }, 1500);
         }
-      }, 3500);
+      }, 500);
+
+      // Timeout dự phòng tối đa 15s
+      setTimeout(() => clearInterval(checkLoadedInterval), 15000);
     }
 
     // Trạng thái ban đầu: nếu người dùng chưa mở thì mặc định thu gọn thành nút tròn (#atd-fab)
