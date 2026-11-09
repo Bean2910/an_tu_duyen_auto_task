@@ -1801,7 +1801,7 @@
       const maxWait = isTron ? 100000 : 25000;
       const startTime = Date.now();
       while (Date.now() - startTime < maxWait) {
-        if (myRun !== currentRunId) return false;
+        if (myRun !== runId) return false;
         await sleep(1000, myRun);
         const toast = $(".toast");
         if (toast && toast.textContent && (toast.textContent.includes("hạ cánh") || toast.textContent.includes("tới sân chùa"))) {
@@ -1820,7 +1820,7 @@
 
   // Nút hành động trực tiếp: Cưỡi Hạc ngay lập tức (Bỏ qua lố giờ)
   async function triggerDirectCuoiHac(flyKind = "tron") {
-    if (isRunning) {
+    if (running) {
       log("Đang có tiến trình chạy Auto. Vui lòng bấm Dừng trước khi cưỡi hạc thủ công, hoặc bật tác vụ 'Cưỡi hạc' để tự động bay.", "warn");
       return;
     }
@@ -2932,7 +2932,7 @@
       updateTagUI();
       log(`[Clone #${currentCloneId}] Đã nhận diện Tab Clone. Chờ 3.5s để tự động di chuyển vào Chánh điện túc trực lạy cùng…`, "ok");
       setTimeout(() => {
-        if (!isRunning) {
+        if (!running) {
           start();
         }
       }, 3500);
