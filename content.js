@@ -13,6 +13,8 @@
   let lastKnownPlace = "";
   let peerBowEvents = [];
   let minPeersToBow = Number(localStorage.getItem("atd_dt_min") || "2");
+  let lastLandedCraneTime = 0;
+  let lastHacData = null;
 
   function triggerBowAction() {
     const now = Date.now();
@@ -99,7 +101,8 @@
     // 🐾 Linh thú & Dạo cảnh
     { id: "linhthu", label: "Vườn Linh Thú", category: "linhvat", once: true },
     { id: "choan", label: "Cho ăn thú", category: "linhvat", once: true },
-    { id: "cuoitrau", label: "Cưỡi trâu", category: "linhvat", once: true }
+    { id: "cuoitrau", label: "Cưỡi trâu", category: "linhvat", once: true },
+    { id: "cuoihac", label: "Cưỡi hạc", category: "linhvat", once: true }
   ];
 
   // Chỉ mục địa điểm trong mảng Zi của main-C2FINDTG.js (Menu -> Bản đồ)
@@ -315,9 +318,23 @@
     const origSend = WebSocket.prototype.send;
     WebSocket.prototype.send = function(...args) {
       activeWs = this;
+      if (!this._atdMsgHooked) {
+        this._atdMsgHooked = true;
+        this.addEventListener("message", (evt) => {
+          try {
+            const data = typeof evt.data === "string" ? JSON.parse(evt.data) : null;
+            if (data && data.t === "linhvat" && data.hac) {
+              lastHacData = data.hac;
+            }
+          } catch {}
+        });
+      }
       try {
         const payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
         if (payload) {
+          if (payload.t === "lv-xuong") {
+            lastLandedCraneTime = Date.now();
+          }
           if (payload.t === "visit" && payload.zone) {
             currentZone = payload.zone;
             lastKnownPlace = payload.zone;
@@ -702,6 +719,27 @@
     if (placeIdx === PLACES.SAN_CHUA || pName.includes("san chua")) {
       if (findActionBtn("Quét lá")) return true;
       if (currentZone && norm(currentZone).includes("san chua")) return true;
+      return false;
+    }
+
+    // 9b. Hạc trắng (Hồ trước cổng)
+    if (placeIdx === PLACES.HAC_TRANG || pName.includes("hac")) {
+      if (findActionBtn("Hạc trắng") || $(".sheet.hac.open")) return true;
+      if (currentZone && norm(currentZone).includes("hac")) return true;
+      return false;
+    }
+
+    // 9c. Bãi chăn trâu
+    if (placeIdx === PLACES.BAI_CHAN_TRAU || pName.includes("trau")) {
+      if (findActionBtn("Trâu") || $(".sheet.trau.open")) return true;
+      if (currentZone && norm(currentZone).includes("trau")) return true;
+      return false;
+    }
+
+    // 9d. Rùa thần
+    if (placeIdx === PLACES.RUA_THAN || pName.includes("rua")) {
+      if (findActionBtn("Rùa thần") || $(".sheet.rua.open")) return true;
+      if (currentZone && norm(currentZone).includes("rua")) return true;
       return false;
     }
 
@@ -1602,6 +1640,179 @@
     return false;
   }
 
+  // Bỏ qua giới hạn giờ cưỡi Hạc: đặt tham số gio=17 vào URL (trong khung giờ chiều 16–19h của Hạc)
+  function setCraneHourOverride() {
+    try {
+      const url = new URL(window.location.href);
+      const cur = url.searchParams.get("gio");
+      const num = Number(cur);
+      const inHours = !Number.isNaN(num) && ((num >= 5 && num < 9) || (num >= 16 && num < 19));
+      if (!inHours) {
+        url.searchParams.set("gio", "17");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch (e) {
+      console.warn("[AutoTask] setCraneHourOverride error:", e);
+    }
+  }
+
+  // Mở khóa Hạc trắng (Bonded + Fly): Dispatch gói tin linhvat giả lập vào client
+  function enableHacFly() {
+    setCraneHourOverride();
+    if (activeWs) {
+      try {
+        const fakeHac = {
+          s: 7,
+          today: false,
+          w: -1,
+          bonded: true,
+          l: 1,
+          fly: ["tron", "dua"],
+          intro: false
+        };
+        const evt = new MessageEvent("message", {
+          data: JSON.stringify({ t: "linhvat", hac: fakeHac })
+        });
+        if (typeof activeWs.onmessage === "function") {
+          activeWs.onmessage(evt);
+        }
+        activeWs.dispatchEvent(evt);
+      } catch (err) {
+        console.warn("[AutoTask] enableHacFly dispatch error:", err);
+      }
+    }
+  }
+
+  // 13c2. Cưỡi Hạc trắng bay ngắm cảnh chùa (Bỏ qua giới hạn giờ / Lố giờ)
+  async function runCuoiHac(myRun, flyKind = "tron") {
+    log("🦅 Chuẩn bị cưỡi Hạc trắng (Bỏ qua giới hạn giờ)…", "step");
+    enableHacFly();
+
+    const ok = await teleportToPlace(PLACES.HAC_TRANG, "Hạc trắng", myRun);
+    if (!ok) return false;
+
+    await sleep(1000, myRun);
+    enableHacFly();
+
+    let hacBtn = findActionBtn("Hạc trắng");
+    if (!hacBtn) {
+      clickMenu("linhvat");
+    } else {
+      fireClick(hacBtn);
+    }
+
+    const sheet = await waitFor(() => $(".sheet.hac.open"), 2500, myRun);
+    if (!sheet) {
+      enableHacFly();
+      clickMenu("linhvat");
+      await sleep(1000, myRun);
+    }
+
+    enableHacFly();
+    await sleep(300, myRun);
+
+    let flyBtn = $(`[data-fly="${flyKind}"]`) || $(`[data-fly]`);
+    if (!flyBtn) {
+      enableHacFly();
+      await sleep(400, myRun);
+      flyBtn = $(`[data-fly="${flyKind}"]`) || $(`[data-fly]`);
+    }
+
+    if (flyBtn) {
+      const isTron = (flyBtn.getAttribute("data-fly") || flyKind) === "tron";
+      log(`🦅 Hạc cất cánh · ${isTron ? "Theo hạc ngắm toàn cảnh chùa (~1.5 phút)" : "Theo hạc bay lên chùa (~15s)"}…`, "ok");
+      fireClick(flyBtn);
+
+      const maxWait = isTron ? 100000 : 25000;
+      const startTime = Date.now();
+      while (Date.now() - startTime < maxWait) {
+        if (myRun !== currentRunId) return false;
+        await sleep(1000, myRun);
+        const toast = $(".toast");
+        if (toast && toast.textContent && (toast.textContent.includes("hạ cánh") || toast.textContent.includes("tới sân chùa"))) {
+          break;
+        }
+      }
+
+      log("🦅 Hạc đã hạ cánh an toàn. A Di Đà Phật!", "ok");
+      await sleep(1200, myRun);
+      return true;
+    } else {
+      log("⚠️ Chưa tìm thấy nút cưỡi hạc, hãy thử lại khi đứng cạnh Hạc ở bờ hồ.", "warn");
+      return false;
+    }
+  }
+
+  // Nút hành động trực tiếp: Cưỡi Hạc ngay lập tức (Bỏ qua lố giờ)
+  async function triggerDirectCuoiHac(flyKind = "tron") {
+    if (isRunning) {
+      log("Đang có tiến trình chạy Auto. Vui lòng bấm Dừng trước khi cưỡi hạc thủ công, hoặc bật tác vụ 'Cưỡi hạc' để tự động bay.", "warn");
+      return;
+    }
+    const isTron = flyKind === "tron";
+    log(`🦅 Bắt đầu cưỡi Hạc trắng (${isTron ? "Ngắm toàn cảnh chùa ~1.5 phút" : "Bay lên sân chùa ~15s"}) · Bỏ qua giới hạn giờ…`, "step");
+    setStatus("🦅 Đang chuẩn bị cưỡi Hạc trắng…");
+
+    setCraneHourOverride();
+    enableHacFly();
+
+    const ok = await teleportToPlace(PLACES.HAC_TRANG, "Hạc trắng", null);
+    if (!ok) {
+      setStatus("Sẵn sàng · bấm Chạy để tự động thực hiện");
+      return;
+    }
+
+    await sleep(1000);
+    enableHacFly();
+
+    let hacBtn = findActionBtn("Hạc trắng");
+    if (!hacBtn) {
+      clickMenu("linhvat");
+    } else {
+      fireClick(hacBtn);
+    }
+
+    let sheet = await waitFor(() => $(".sheet.hac.open"), 2500);
+    if (!sheet) {
+      enableHacFly();
+      clickMenu("linhvat");
+      await sleep(1000);
+      sheet = $(".sheet.hac.open");
+    }
+
+    enableHacFly();
+    await sleep(300);
+
+    let flyBtn = $(`[data-fly="${flyKind}"]`) || $(`[data-fly]`);
+    if (!flyBtn) {
+      enableHacFly();
+      await sleep(400);
+      flyBtn = $(`[data-fly="${flyKind}"]`) || $(`[data-fly]`);
+    }
+
+    if (flyBtn) {
+      log(`🦅 Hạc cất cánh · ${isTron ? "Theo hạc ngắm chùa (~1.5 phút)" : "Theo hạc lên chùa (~15s)"}!`, "ok");
+      setStatus(`🦅 Đang bay cùng Hạc trắng (${isTron ? "Ngắm cảnh chùa" : "Lên sân chùa"})…`);
+      fireClick(flyBtn);
+
+      const maxWait = isTron ? 100000 : 25000;
+      const startTime = Date.now();
+      while (Date.now() - startTime < maxWait) {
+        await sleep(1000);
+        const toast = $(".toast");
+        if (toast && toast.textContent && (toast.textContent.includes("hạ cánh") || toast.textContent.includes("tới sân chùa"))) {
+          break;
+        }
+      }
+
+      log("🦅 Hạc đã hạ cánh. Chúc bạn một ngày an vui, vạn sự cát tường! A Di Đà Phật!", "ok");
+      setStatus("Sẵn sàng · bấm Chạy để tự động thực hiện");
+    } else {
+      log("⚠️ Chưa tìm thấy nút bay của Hạc, hãy thử bấm lại khi đứng cạnh Hạc ở bờ hồ nhé.", "warn");
+      setStatus("Sẵn sàng · bấm Chạy để tự động thực hiện");
+    }
+  }
+
   // 13d. Hóa vàng & Hồi hướng gia tiên ({ t: "hoa-vang" }, { t: "hv-hoihuong" })
   async function runHoaVang(myRun) {
     await closeAllModals(myRun);
@@ -1874,6 +2085,7 @@
     linhthu: runLinhThu,
     choan: runChoAn,
     cuoitrau: runCuoiTrau,
+    cuoihac: runCuoiHac,
     thaydo: runThayDo,
     mo: runMo,
     beads: runBeads,
@@ -2411,6 +2623,19 @@
                 </div>
               </div>
             </div>
+            <div class="atd-hac-quick-box" id="atd-hac-quick-box">
+              <div class="atd-hac-title">
+                <span>🦅 <b>Cưỡi Hạc trắng</b> (Bỏ qua lố giờ):</span>
+              </div>
+              <div class="atd-hac-btns">
+                <button type="button" class="atd-hac-btn" id="atd-btn-hac-tron" title="Hạc đưa bạn bay 1 vòng lớn quanh chùa (~1.5 phút)">
+                  🦅 Ngắm chùa (~1.5p)
+                </button>
+                <button type="button" class="atd-hac-btn ghost" id="atd-btn-hac-dua" title="Hạc đưa bạn từ hồ bay qua cổng lên sân chùa (~15s)">
+                  🛫 Lên chùa (15s)
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="atd-today-box">
@@ -2519,6 +2744,19 @@
           tag.style.display = "none";
         }
       });
+      const hacBox = $("#atd-hac-quick-box", panel);
+      if (hacBox) {
+        hacBox.style.display = (catId === "all" || catId === "linhvat") ? "flex" : "none";
+      }
+    }
+
+    const btnHacTron = $("#atd-btn-hac-tron", panel);
+    if (btnHacTron) {
+      btnHacTron.addEventListener("click", () => triggerDirectCuoiHac("tron"));
+    }
+    const btnHacDua = $("#atd-btn-hac-dua", panel);
+    if (btnHacDua) {
+      btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
     }
 
     $$(".atd-task-tab", panel).forEach((tab) => {
