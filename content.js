@@ -14,6 +14,32 @@
       const origSet = Storage.prototype.setItem;
       const origRemove = Storage.prototype.removeItem;
 
+      // Đảm bảo tạo ngay 1 CID và Profile độc lập trong sessionStorage
+      let cloneCid = sessionStorage.getItem(prefix + "anduyen.cid");
+      if (!cloneCid) {
+        cloneCid = "cid_clone_" + currentCloneId + "_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+        sessionStorage.setItem(prefix + "anduyen.cid", cloneCid);
+      }
+
+      let cloneProfile = sessionStorage.getItem(prefix + "anduyen.profile");
+      if (!cloneProfile) {
+        const monkNames = ["Tiểu Lành", "Tiểu An", "Tiểu Tịnh", "Tiểu Trí", "Tiểu Tuệ", "Tiểu Đức", "Tiểu Phúc", "Tiểu Nhân", "Tiểu Nghĩa", "Tiểu Hòa"];
+        const randomName = monkNames[(Number(currentCloneId) - 1) % monkNames.length] || `Đệ tử #${currentCloneId}`;
+        const robes = ["nau", "lam", "xam"];
+        const randomRobe = robes[(Number(currentCloneId) - 1) % robes.length];
+        cloneProfile = JSON.stringify({
+          name: randomName,
+          kind: "tieu",
+          robe: randomRobe,
+          skin: 1,
+          bio: `Đệ tử trợ lực #${currentCloneId}`,
+          beads: "go",
+          cushion: "vang",
+          phapkhi: "mo"
+        });
+        sessionStorage.setItem(prefix + "anduyen.profile", cloneProfile);
+      }
+
       const isolatedKeys = new Set([
         "anduyen.cid",
         "anduyen.profile",
@@ -26,27 +52,28 @@
       ]);
 
       Storage.prototype.getItem = function(key) {
-        if (this === window.localStorage && isolatedKeys.has(key)) {
-          return sessionStorage.getItem(prefix + key);
+        if (isolatedKeys.has(key)) {
+          const val = sessionStorage.getItem(prefix + key);
+          if (val !== null) return val;
         }
         return origGet.apply(this, arguments);
       };
 
       Storage.prototype.setItem = function(key, val) {
-        if (this === window.localStorage && isolatedKeys.has(key)) {
+        if (isolatedKeys.has(key)) {
           return sessionStorage.setItem(prefix + key, String(val));
         }
         return origSet.apply(this, arguments);
       };
 
       Storage.prototype.removeItem = function(key) {
-        if (this === window.localStorage && isolatedKeys.has(key)) {
+        if (isolatedKeys.has(key)) {
           return sessionStorage.removeItem(prefix + key);
         }
         return origRemove.apply(this, arguments);
       };
 
-      console.log(`[AutoTask] Đã kích hoạt Clone Tab #${currentCloneId} · Phân tách tài khoản độc lập!`);
+      console.log(`[AutoTask] Đã kích hoạt Clone Tab #${currentCloneId} · CID độc lập: ${cloneCid}`);
       const origDocTitle = document.title;
       document.title = `[Clone #${currentCloneId}] ${origDocTitle || "An Tự Duyên"}`;
     } catch (e) {
@@ -234,16 +261,18 @@
     if (!curRoom) {
       targetUrl.searchParams.set("phong", "chua1");
     }
-    window.open(targetUrl.toString(), "_blank");
-    log(`👥 Đã mở Tab Clone #${id} (độc lập danh tính) · Tự động vào Chánh điện lạy cùng!`, "ok");
+    const win = window.open(targetUrl.toString(), "_blank");
+    if (!win) {
+      log(`⚠️ Trình duyệt chặn Popup! Hãy bấm biểu tượng 🚫 "Cửa sổ bật lên bị chặn" ở góc phải thanh địa chỉ Chrome và chọn "Luôn cho phép" nhé!`, "warn");
+    } else {
+      log(`👥 Đã mở Tab Clone #${id} (CID độc lập) · Tự động vào Chánh điện lạy cùng!`, "ok");
+    }
   }
 
   function openMultipleClones(total = 3) {
-    log(`🚀 Đang mở ${total} Tab Clone độc lập danh tính vào Chánh điện…`, "step");
+    log(`🚀 Đang mở ${total} Tab Clone vào Chánh điện (Nếu chỉ mở 1 tab, hãy bấm biểu tượng Cho phép Popup trên thanh địa chỉ hoặc bấm nút "+1 Clone" 4 lần nhé)…`, "step");
     for (let i = 1; i <= total; i++) {
-      setTimeout(() => {
-        openNewCloneTab(i);
-      }, (i - 1) * 700);
+      openNewCloneTab(i);
     }
   }
 
@@ -516,8 +545,22 @@
         });
       }
       try {
-        const payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
+        let payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
         if (payload) {
+          // BẮT BUỘC ĐẢM BẢO CID KHÔNG TRÙNG LẶP CHO CLONE TAB ĐỂ SERVER KHÔNG BÁO "Chùa đang mở ở nơi khác"
+          if (payload.t === "hello" && isCloneTab) {
+            let cloneCid = sessionStorage.getItem(`atd_clone_${currentCloneId}_anduyen.cid`);
+            if (!cloneCid) {
+              cloneCid = "cid_clone_" + currentCloneId + "_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+              sessionStorage.setItem(`atd_clone_${currentCloneId}_anduyen.cid`, cloneCid);
+            }
+            payload.cid = cloneCid;
+            if (payload.name && !payload.name.includes("#")) {
+              payload.name = payload.name + ` #${currentCloneId}`;
+            }
+            args[0] = JSON.stringify(payload);
+            console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct CID:`, cloneCid, "Name:", payload.name);
+          }
           if (payload.t === "lv-xuong") {
             lastLandedCraneTime = Date.now();
           }
