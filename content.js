@@ -73,6 +73,7 @@
     // 📿 Tu tập & Khóa lễ
     { id: "thoikhoa", label: "Thời khóa", category: "tutap", once: true },
     { id: "tangkinh", label: "Tàng Kinh Các", category: "tutap", once: true },
+    { id: "bode", label: "Hạt bồ đề", category: "tutap", once: true },
     { id: "mo", label: "Gõ mõ", category: "tutap", once: false },
     { id: "beads", label: "Chuỗi hạt", category: "tutap", once: false },
     { id: "claim", label: "Nhận thưởng", category: "tutap", once: false },
@@ -124,6 +125,25 @@
     VUON_LINH_THU: 18,
     VUON_HOA: 19
   };
+
+  // Trạng thái chuỗi 108 hạt bồ đề từ Server ({ t: "bode", got })
+  let bodeGot = localStorage.getItem("atd_bode_got") || "";
+
+  // Toàn bộ 108 tọa độ hạt bồ đề khắp chùa [x, y, z, zoneIdx, isNightOnly]
+  const BODE_SEEDS = [
+    [2.2,0,115.8,0,0],[-2.6,.3,143.8,0,0],[-12.2,0,99.8,0,0],[12.6,0,99.8,0,0],[3,.3,130.2,0,1],[-.2,0,103,0,0],[-5.8,0,119.8,0,0],[4.6,0,96.6,0,0],[-2.6,.3,135.8,0,0],
+    [-1.8,0,78.2,1,0],[14.2,0,64.6,1,0],[15.8,0,87,1,0],[-5,0,59.8,1,0],[-5.8,0,95,1,1],[-17.8,0,83,1,0],[-17,0,68.6,1,0],[6.2,0,94.2,1,0],[3,0,67.8,1,0],
+    [-.2,0,35.8,2,0],[-6.6,0,52.6,2,0],[11,0,49.4,2,0],[-16.2,0,35,2,0],[9.4,0,23,2,1],[-5,0,21.4,2,0],[10.2,0,38.2,2,0],[-9,0,42.2,2,0],[-8.2,0,30.2,2,0],
+    [-24.2,0,31.8,3,0],[28.6,1.8,10.2,3,0],[25.4,.3,57.4,3,0],[-25.8,.3,57.4,3,0],[28.6,0,35,3,1],[-28.2,1.8,10.2,3,0],[-25,.3,44.6,3,0],[24.6,.3,22.2,3,0],[27,.3,46.2,3,0],
+    [1.4,2.4,-4.2,4,0],[-18.6,2.4,-29,4,0],[19,2.4,-29,4,0],[-20.2,2.4,3,4,0],[19.8,2.4,3,4,1],[-.2,2.4,-23.4,4,0],[-13.8,2.4,-13,4,0],[15.8,2.4,-13,4,0],[-8.2,2.4,3,4,0],
+    [-.2,4.6,-67.4,5,0],[-3.4,4.6,-47.4,5,0],[12.6,4.6,-55.4,5,0],[-13,4.6,-59.4,5,0],[12.6,4.6,-69.8,5,1],[-10.6,4.6,-72.2,5,0],[1.4,4.6,-57,5,0],[4.6,0,-76.2,5,0],[5.4,4.6,-48.2,5,0],
+    [40.6,0,33.4,6,0],[67,0,-.2,6,0],[33.4,0,1.4,6,0],[71,0,32.6,6,0],[29.4,0,19,6,1],[71,0,15.8,6,0],[44.6,0,44.6,6,0],[29.4,0,31,6,0],[34.2,.13,11,6,0],
+    [-39.4,0,24.6,7,0],[-43.4,0,5.4,7,0],[-54.6,0,30.2,7,0],[-29,1.8,12.6,7,0],[-54.6,0,13.4,7,1],[-44.2,0,38.2,7,0],[-29,0,31.8,7,0],[-49,0,22.2,7,0],[-38.6,0,14.2,7,0],
+    [-32.2,0,-30.6,8,0],[-56.2,0,-43.4,8,0],[-53.8,0,-18.6,8,0],[-36.2,0,-44.2,8,0],[-35.4,0,-17.8,8,1],[-29,1.8,-39.4,8,0],[-29,1.8,-24.2,8,0],[-57,0,-24.2,8,0],[-34.6,0,-23.4,8,0],
+    [41.4,5.43,-51.4,9,0],[31,0,-44.2,9,0],[51.8,5.02,-53.8,9,0],[47.8,5.14,-46.6,9,0],[45.4,5.09,-57.8,9,1],[43,5.2,-47.4,9,0],[30.2,0,-48.2,9,0],[51,5.2,-49.8,9,0],[49.4,5.03,-57,9,0],
+    [-46.6,0,81.4,10,0],[-37.8,0,67,10,0],[-37.8,0,95,10,0],[-53.8,0,67,10,0],[-53.8,0,95,10,1],[-37,0,79.8,10,0],[-45.8,0,71.8,10,0],[-45.8,0,91,10,0],[-53.8,0,75.8,10,0],
+    [14.2,0,75.8,11,0],[19,0,67,11,0],[15.8,0,84.6,11,0],[10.2,0,67,11,0],[10.2,0,81.4,11,1],[19,0,79.8,11,0],[8.6,0,75,11,0],[14.2,0,70.2,11,0],[19,0,71.8,11,0]
+  ];
 
   const todayDateStr = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 
@@ -253,6 +273,26 @@
     if (serverChores.ca && !doneOnce.has("ca")) { doneOnce.add("ca"); changed = true; }
     if (serverChores.den && !doneOnce.has("lamp")) { doneOnce.add("lamp"); changed = true; }
     if (serverChores.tk && !doneOnce.has("thoikhoa")) { doneOnce.add("thoikhoa"); changed = true; }
+
+    // 3. Tiến độ Hạt bồ đề từ Server ({ t: "bode", got })
+    if (msg.t === "bode" && typeof msg.got === "string") {
+      bodeGot = msg.got;
+      try { localStorage.setItem("atd_bode_got", msg.got); } catch {}
+      if ([...msg.got].every((c) => c === "1")) {
+        doneOnce.add("bode");
+      }
+      changed = true;
+    }
+    if (msg.t === "bode-nhat" && typeof msg.i === "number") {
+      if (bodeGot && bodeGot.length === 108) {
+        bodeGot = bodeGot.slice(0, msg.i) + "1" + bodeGot.slice(msg.i + 1);
+        try { localStorage.setItem("atd_bode_got", bodeGot); } catch {}
+        if ([...bodeGot].every((c) => c === "1")) {
+          doneOnce.add("bode");
+        }
+      }
+      changed = true;
+    }
 
     if (changed) {
       saveServerChores();
@@ -881,6 +921,101 @@
     await sleep(900, myRun);
     fireClick($(".lib.tk.open .lib-close"));
     await sleep(350, myRun);
+    return true;
+  }
+
+  // 2b. Tự động tìm & nhặt 108 hạt bồ đề khắp chùa ({ t: "bode-nhat" })
+  async function runBoDe(myRun) {
+    await closeAllModals(myRun);
+    log("Bắt đầu tự động tìm & nhặt 108 hạt bồ đề khắp chùa…", "info");
+
+    let totalCollected = 0;
+    let pickedCount = 0;
+
+    // Duyệt qua 12 khu vực trong chùa (0 đến 11)
+    for (let zone = 0; zone < 12; zone++) {
+      if (!checkRun(myRun)) return false;
+
+      let zoneExhausted = false;
+      let attempts = 0;
+
+      while (!zoneExhausted && attempts < 9) {
+        if (!checkRun(myRun)) return false;
+        attempts++;
+
+        // 1. Mở Sổ hạt bồ đề để lấy nút "Đi tìm" của khu vực này
+        await closeAllModals(myRun);
+        if (!clickMenu("bode")) {
+          log("Không tìm thấy mục Hạt bồ đề trong Menu.", "warn");
+          break;
+        }
+
+        const bodeSheet = await waitFor(() => $(".sheet.bode.open"), 2500, myRun);
+        if (!bodeSheet) break;
+
+        const totalEl = $(".bode-total b", bodeSheet);
+        if (totalEl) totalCollected = parseInt(totalEl.textContent) || 0;
+
+        if (totalCollected >= 108) {
+          log("Chúc mừng! Đã nhặt trọn vẹn 108/108 hạt bồ đề khắp chùa! (Được Tràng hạt bồ đề 108).", "ok");
+          fireClick($(".sheet-close", bodeSheet));
+          return true;
+        }
+
+        const goBtn = $(`[data-go="${zone}"]`, bodeSheet);
+        if (!goBtn) {
+          // Khu này đã hoàn tất 9/9 hạt
+          zoneExhausted = true;
+          fireClick($(".sheet-close", bodeSheet));
+          await sleep(250, myRun);
+          break;
+        }
+
+        const zoneLi = goBtn.closest("li");
+        const zoneName = zoneLi ? (zoneLi.querySelector("b")?.textContent || `Khu ${zone}`) : `Khu ${zone}`;
+
+        // 2. Bấm "Đi tìm" để game tự teleport nhân vật tới sát hạt bồ đề (cách 2.3m)
+        fireClick(goBtn);
+        await sleep(1300, myRun);
+
+        const toast = getToastText();
+        if (toast.includes("ban đêm") || toast.includes("18 giờ")) {
+          log(`${zoneName}: Hạt còn lại chỉ hiện ban đêm (18h-6h) · Chuyển khu tiếp theo.`, "info");
+          zoneExhausted = true;
+          break;
+        }
+
+        // 3. Tìm chỉ số hạt bồ đề gần nhất trong zone này chưa nhặt
+        let targetIdx = -1;
+        if (bodeGot && bodeGot.length === 108) {
+          for (let i = 0; i < 108; i++) {
+            if (BODE_SEEDS[i][3] === zone && bodeGot[i] !== "1") {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+
+        if (targetIdx >= 0 && activeWs && activeWs.readyState === WebSocket.OPEN) {
+          activeWs.send(JSON.stringify({ t: "bode-nhat", i: targetIdx }));
+          pickedCount++;
+          log(`✦ Đã nhặt hạt bồ đề tại ${zoneName} (Hạt #${targetIdx + 1})`, "ok");
+          await sleep(1200, myRun);
+        } else {
+          // Thử gửi cho các hạt trong zone
+          for (let i = 0; i < 108; i++) {
+            if (BODE_SEEDS[i][3] === zone && (!bodeGot || bodeGot[i] !== "1")) {
+              activeWs?.send(JSON.stringify({ t: "bode-nhat", i }));
+              await sleep(150, myRun);
+            }
+          }
+          await sleep(900, myRun);
+        }
+      }
+    }
+
+    await closeAllModals(myRun);
+    log(`Hoàn thành chu kỳ nhặt hạt bồ đề! (Đã thu thập: ${totalCollected}/108 hạt).`, "ok");
     return true;
   }
 
@@ -1722,6 +1857,7 @@
   const RUNNERS = {
     thoikhoa: runThoiKhoa,
     tangkinh: runTangKinh,
+    bode: runBoDe,
     incense: runIncenseChanhDien,
     dongtam: runDongTam,
     san_incense: runSanIncense,
@@ -1773,6 +1909,7 @@
     const isQuetDone = Boolean(serverChores.quet || doneOnce.has("quet"));
     const isCaDone = Boolean(serverChores.ca || doneOnce.has("ca"));
     const isTkDone = Boolean(serverChores.tk || doneOnce.has("thoikhoa"));
+    const bodeCount = bodeGot ? [...bodeGot].filter((c) => c === "1").length : 0;
 
     const items = [
       {
@@ -1790,6 +1927,14 @@
         badge: beadsDone
           ? `<span class="atd-badge-done" title="Đã trọn chuỗi 108 hạt niệm Phật hôm nay">Đủ 108</span>`
           : `<span class="atd-badge-ok">${stats.beads}/108</span>`
+      },
+      {
+        id: "bode",
+        label: "Hạt bồ đề",
+        val: `${bodeCount}/108`,
+        badge: bodeCount >= 108
+          ? `<span class="atd-badge-done" title="Đã nhặt đủ 108 hạt bồ đề khắp chùa">Đủ 108</span>`
+          : `<span class="atd-badge-ok">${bodeCount}/108</span>`
       },
       {
         id: "incense",
@@ -1822,6 +1967,14 @@
         badge: isCaDone
           ? `<span class="atd-badge-done">Đã nhận</span>`
           : `<span class="atd-badge-ok">Chưa thả</span>`
+      },
+      {
+        id: "hoavang",
+        label: "Hóa vàng",
+        val: doneOnce.has("hoavang") ? "Đã hóa" : "Chưa hóa",
+        badge: doneOnce.has("hoavang")
+          ? `<span class="atd-badge-done">Xong</span>`
+          : `<span class="atd-badge-ok">Chưa làm</span>`
       }
     ];
 
