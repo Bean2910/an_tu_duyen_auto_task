@@ -2,6 +2,18 @@
   if (window.__ATD_AUTO_TASK_LOADED__) return;
   window.__ATD_AUTO_TASK_LOADED__ = true;
 
+  // Chống đóng băng / chống throttle khi các Tab Clone chạy ở chế độ nền (background tab)
+  try {
+    Object.defineProperty(document, "hidden", {
+      get: () => false,
+      configurable: true
+    });
+    Object.defineProperty(document, "visibilityState", {
+      get: () => "visible",
+      configurable: true
+    });
+  } catch {}
+
   // --- CHẾ ĐỘ PHÂN TÁCH DANH TÍNH ĐA TAB / CLONE TAB (?clone=1, ?clone=2, ...) ---
   const urlParams = new URLSearchParams(window.location.search);
   const currentCloneId = urlParams.get("clone");
@@ -104,7 +116,12 @@
   let peerBowEvents = [];
 
   // Vai trò Swarm: 'master' (Tab Chủ trì) hoặc 'follower' (Tab Trợ lực)
-  let swarmRole = sessionStorage.getItem("atd_swarm_role") || (isCloneTab ? "follower" : "master");
+  // Nếu có ?clone= trên URL -> BẮT BUỘC 100% LÀ 'follower'!
+  // Không đọc lại từ sessionStorage vì window.open sao chép sessionStorage từ tab cha (Master)!
+  let swarmRole = isCloneTab ? "follower" : (sessionStorage.getItem("atd_swarm_role") || "master");
+  if (isCloneTab) {
+    try { sessionStorage.setItem("atd_swarm_role", "follower"); } catch {}
+  }
   let minPeersToBow = swarmRole === "follower" ? 1 : Number(localStorage.getItem("atd_dt_min") || "5");
   let activeSwarmPeers = new Map(); // from -> { role, cloneId, name, time }
   let lastLandedCraneTime = 0;
@@ -119,7 +136,9 @@
     if (layBtn && !layBtn.disabled) {
       fireClick(layBtn);
       clicked = true;
-    } else if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+    }
+    // Luôn đảm bảo gửi gói tin emote lạy qua WebSocket lên server
+    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
       try {
         activeWs.send(JSON.stringify({ t: "emote", e: "lay" }));
         clicked = true;
@@ -132,6 +151,16 @@
     const now = Date.now();
     if (now - lastOwnBowTime < 4800) return false;
     return triggerDirectBow();
+  }
+
+  // Giao tiếp Swarm kép: vừa qua BroadcastChannel vừa qua localStorage StorageEvent (chống thất lạc)
+  function sendSwarmMessage(msg) {
+    if (swarmChannel) {
+      try { swarmChannel.postMessage(msg); } catch (e) {}
+    }
+    try {
+      localStorage.setItem("atd_swarm_bus", JSON.stringify({ ...msg, _t: Date.now() + Math.random() }));
+    } catch (e) {}
   }
 
   // --- QUY TRÌNH PHỐI HỢP: ĐỆ TỬ LẠY TRƯỚC -> BÁO VỀ -> CHỦ TRÌ LẠY THEO ---
@@ -158,26 +187,22 @@
       startTime: Date.now()
     };
 
-    // 1. Master phát tin nhắn CLONES_BOW_FIRST qua BroadcastChannel
-    if (swarmChannel) {
-      try {
-        swarmChannel.postMessage({
-          type: "CLONES_BOW_FIRST",
-          from: TAB_ID,
-          sessionId: sessionId,
-          time: Date.now()
-        });
-      } catch (e) {
-        console.warn("[AutoTask] Swarm postMessage error:", e);
-      }
-    }
+    // 1. Master phát tin nhắn CLONES_BOW_FIRST qua cả BroadcastChannel lẫn Storage Bus
+    sendSwarmMessage({
+      type: "CLONES_BOW_FIRST",
+      from: TAB_ID,
+      sessionId: sessionId,
+      time: Date.now()
+    });
 
-    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~850ms, hoặc khi đủ acks và đã trôi qua ít nhất 450ms)
-    const waitLimit = 850;
+    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~950ms)
+    const waitLimit = 950;
     const startWait = Date.now();
     while (Date.now() - startWait < waitLimit) {
       const elapsed = Date.now() - startWait;
-      if (followerCount > 0 && pendingBowSession.acks.size >= followerCount && elapsed >= 450) {
+      const ackCount = pendingBowSession.acks.size;
+      const expected = followerCount > 0 ? followerCount : 1;
+      if (ackCount >= expected && elapsed >= 450) {
         break;
       }
       await new Promise((r) => setTimeout(r, 60));
@@ -188,7 +213,7 @@
       const names = Array.from(pendingBowSession.acks.values()).join(", ");
       log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${ackCount} đệ tử: [${names}] đã lạy trước!`, "ok");
     } else {
-      log(`⚠️ [Chủ trì] Chưa nhận phản hồi từ đệ tử (có thể chưa mở tab Clone) · Chủ trì vẫn tiến hành lạy…`, "wait");
+      log(`⚠️ [Chủ trì] Chưa nhận phản hồi từ đệ tử · Chủ trì vẫn tiến hành lạy…`, "wait");
     }
 
     // 3. Chủ trì lạy theo ngay khi các đệ tử đang ở giữa nhịp lạy (~5.6s) trên server
@@ -205,26 +230,18 @@
   }
 
   function broadcastSwarmBow() {
-    if (swarmChannel) {
-      try {
-        swarmChannel.postMessage({ type: "SWARM_BOW", from: TAB_ID, time: Date.now() });
-      } catch {}
-    }
+    sendSwarmMessage({ type: "SWARM_BOW", from: TAB_ID, time: Date.now() });
   }
 
   function broadcastSwarmHeartbeat() {
-    if (swarmChannel) {
-      try {
-        swarmChannel.postMessage({
-          type: "SWARM_HEARTBEAT",
-          from: TAB_ID,
-          role: swarmRole,
-          cloneId: currentCloneId || null,
-          name: isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì",
-          time: Date.now()
-        });
-      } catch {}
-    }
+    sendSwarmMessage({
+      type: "SWARM_HEARTBEAT",
+      from: TAB_ID,
+      role: isCloneTab ? "follower" : swarmRole,
+      cloneId: currentCloneId || null,
+      name: isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì",
+      time: Date.now()
+    });
   }
 
   setInterval(broadcastSwarmHeartbeat, 2500);
@@ -280,7 +297,11 @@
 
   function setSwarmRole(role) {
     swarmRole = role;
-    sessionStorage.setItem("atd_swarm_role", role);
+    if (isCloneTab) {
+      sessionStorage.setItem(`atd_swarm_role_clone_${currentCloneId}`, role);
+    } else {
+      sessionStorage.setItem("atd_swarm_role", role);
+    }
     if (role === "follower") {
       minPeersToBow = 1;
     } else {
@@ -297,84 +318,91 @@
     log(`Đã chuyển vai trò Tab: ${role === "master" ? "👑 Tab Chủ trì (Master)" : "🤝 Tab Trợ lực (Follower)"}`, "ok");
   }
 
-  if (swarmChannel) {
-    swarmChannel.onmessage = (event) => {
-      const data = event.data;
-      if (!data || data.from === TAB_ID) return;
+  function handleSwarmMessage(data) {
+    if (!data || data.from === TAB_ID) return;
+    const now = Date.now();
 
-      const now = Date.now();
+    // 1. Nhận nhịp tim từ các tab trong Swarm
+    if (data.type === "SWARM_HEARTBEAT") {
+      activeSwarmPeers.set(data.from, {
+        role: data.role,
+        cloneId: data.cloneId,
+        name: data.name,
+        time: now
+      });
+      updateSwarmInfoUI();
+      return;
+    }
 
-      // 1. Nhận nhịp tim từ các tab trong Swarm
-      if (data.type === "SWARM_HEARTBEAT") {
-        activeSwarmPeers.set(data.from, {
-          role: data.role,
-          cloneId: data.cloneId,
-          name: data.name,
-          time: now
+    // 2. Tab Trợ lực (Follower / Clone) nhận lệnh LẠY TRƯỚC từ Tab Chủ trì (Master)
+    if (data.type === "CLONES_BOW_FIRST") {
+      if (isCloneTab || swarmRole === "follower") {
+        log(`👑 [Đệ tử #${currentCloneId || "Trợ lực"}] Nhận lệnh Lạy từ Chủ trì -> Lập tức lạy trước!`, "ok");
+        const bowed = triggerDirectBow();
+        const myName = `Đệ tử #${currentCloneId || "Trợ lực"}`;
+
+        // Báo tín hiệu ACK về ngay cho Chủ trì qua cả 2 kênh
+        sendSwarmMessage({
+          type: "CLONE_BOWED_ACK",
+          from: TAB_ID,
+          cloneId: currentCloneId,
+          name: myName,
+          sessionId: data.sessionId,
+          bowed: bowed,
+          time: Date.now()
         });
-        updateSwarmInfoUI();
-        return;
+        log(`📡 [Đệ tử #${currentCloneId || "Trợ lực"}] Đã lạy xong -> Báo tín hiệu về Chủ trì thành công!`, "ok");
       }
+      return;
+    }
 
-      // 2. Tab Trợ lực (Follower) nhận lệnh LẠY TRƯỚC từ Tab Chủ trì (Master)
-      if (data.type === "CLONES_BOW_FIRST") {
-        if (swarmRole === "follower") {
-          log("👑 [Trợ lực] Nhận lệnh từ Chủ trì: Đệ tử lập tức lạy trước để dâng nhịp!", "step");
-          const bowed = triggerBowAction();
-          const myName = `Đệ tử #${currentCloneId || "Trợ lực"}`;
-
-          // Báo tín hiệu về ngay cho Chủ trì
-          try {
-            swarmChannel.postMessage({
-              type: "CLONE_BOWED_ACK",
-              from: TAB_ID,
-              cloneId: currentCloneId,
-              name: myName,
-              sessionId: data.sessionId,
-              bowed: bowed,
-              time: Date.now()
-            });
-          } catch {}
-          log(`📡 [Trợ lực] Đã lạy xong -> Báo tín hiệu về Chủ trì thành công!`, "ok");
-        }
-        return;
-      }
-
-      // 3. Tab Chủ trì nhận tín hiệu ACK từ các Tab Trợ lực
-      if (data.type === "CLONE_BOWED_ACK") {
-        if (swarmRole === "master" && pendingBowSession && pendingBowSession.sessionId === data.sessionId) {
-          const cloneName = data.name || `Đệ tử #${data.cloneId || "Trợ lực"}`;
-          if (!pendingBowSession.acks.has(data.from)) {
-            pendingBowSession.acks.set(data.from, cloneName);
-            log(`📥 [Chủ trì] Nhận tín hiệu trợ lực: ${cloneName} đã lạy (${pendingBowSession.acks.size}/${getSwarmFollowerCount() || "?"})`, "info");
-          }
-        }
-        return;
-      }
-
-      // 4. Xử lý sóng lạy đồng tâm từ các tab khác ngoài Swarm hoặc nhịp lạy chung
-      if (data.type === "SWARM_BOW" && autoDongTam) {
-        const peerId = `Tab_${data.from}`;
-        peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
-        peerBowEvents.push({ id: peerId, time: now });
-        lastPeerBowTime = now;
-
-        if (swarmRole === "follower") {
-          return; // Follower chỉ lạy khi có lệnh CLONES_BOW_FIRST từ Chủ trì
-        }
-
-        const count = peerBowEvents.length;
-        if (count >= minPeersToBow) {
-          log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người (có Tab Swarm) -> Lập tức lạy cùng!`, "ok");
-          if (triggerBowAction()) {
-            peerBowEvents = [];
-          }
-        } else {
-          log(`[Đồng tâm Swarm] Có ${count}/${minPeersToBow} lượt lạy từ Tab khác · Chờ thêm để đủ ≥${minPeersToBow} người…`, "wait");
+    // 3. Tab Chủ trì nhận tín hiệu ACK từ các Tab Trợ lực
+    if (data.type === "CLONE_BOWED_ACK") {
+      if ((!isCloneTab && swarmRole === "master") && pendingBowSession && pendingBowSession.sessionId === data.sessionId) {
+        const cloneName = data.name || `Đệ tử #${data.cloneId || "Trợ lực"}`;
+        if (!pendingBowSession.acks.has(data.from)) {
+          pendingBowSession.acks.set(data.from, cloneName);
+          log(`📥 [Chủ trì] Nhận tín hiệu trợ lực: ${cloneName} đã lạy (${pendingBowSession.acks.size}/${getSwarmFollowerCount() || "?"})`, "info");
         }
       }
-    };
+      return;
+    }
+
+    // 4. Xử lý sóng lạy đồng tâm từ các tab khác ngoài Swarm hoặc nhịp lạy chung
+    if (data.type === "SWARM_BOW" && autoDongTam) {
+      const peerId = `Tab_${data.from}`;
+      peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
+      peerBowEvents.push({ id: peerId, time: now });
+      lastPeerBowTime = now;
+
+      if (isCloneTab || swarmRole === "follower") {
+        return; // Follower chỉ lạy khi có lệnh CLONES_BOW_FIRST từ Chủ trì
+      }
+
+      const count = peerBowEvents.length;
+      if (count >= minPeersToBow) {
+        log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người (có Tab Swarm) -> Lập tức lạy cùng!`, "ok");
+        if (triggerBowAction()) {
+          peerBowEvents = [];
+        }
+      } else {
+        log(`[Đồng tâm Swarm] Có ${count}/${minPeersToBow} lượt lạy từ Tab khác · Chờ thêm để đủ ≥${minPeersToBow} người…`, "wait");
+      }
+    }
   }
+
+  if (swarmChannel) {
+    swarmChannel.onmessage = (event) => handleSwarmMessage(event.data);
+  }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === "atd_swarm_bus" && event.newValue) {
+      try {
+        const data = JSON.parse(event.newValue);
+        handleSwarmMessage(data);
+      } catch {}
+    }
+  });
 
   // Quản lý mở các Tab Clone (độc lập tài khoản) để cùng túc trực Chánh điện & Lạy đồng tâm
   let nextCloneCounter = 1;
