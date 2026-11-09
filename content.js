@@ -64,7 +64,11 @@
   let currentZone = "";
   let lastKnownPlace = "";
   let peerBowEvents = [];
-  let minPeersToBow = isCloneTab ? 1 : Number(localStorage.getItem("atd_dt_min") || "2");
+
+  // Vai trò Swarm: 'master' (Tab Chủ trì / Nhạc trưởng) hoặc 'follower' (Tab Trợ lực / Đệ tử)
+  let swarmRole = sessionStorage.getItem("atd_swarm_role") || (isCloneTab ? "follower" : "master");
+  let minPeersToBow = swarmRole === "follower" ? 1 : Number(localStorage.getItem("atd_dt_min") || "5");
+  let activeSwarmPeers = new Map(); // from -> { role, time }
   let lastLandedCraneTime = 0;
   let lastHacData = null;
 
@@ -78,7 +82,20 @@
 
     lastOwnBowTime = now;
     fireClick(layBtn);
+
+    // Nếu tab này là Chủ trì (Master) -> Lập tức phát lệnh Lạy đồng loạt cho tất cả các Tab Trợ lực!
+    if (swarmRole === "master") {
+      broadcastMasterBowCommand();
+    }
     return true;
+  }
+
+  function broadcastMasterBowCommand() {
+    if (swarmChannel) {
+      try {
+        swarmChannel.postMessage({ type: "MASTER_BOW_COMMAND", from: TAB_ID, time: Date.now() });
+      } catch {}
+    }
   }
 
   function broadcastSwarmBow() {
@@ -89,16 +106,110 @@
     }
   }
 
+  function broadcastSwarmHeartbeat() {
+    if (swarmChannel) {
+      try {
+        swarmChannel.postMessage({ type: "SWARM_HEARTBEAT", from: TAB_ID, role: swarmRole, time: Date.now() });
+      } catch {}
+    }
+  }
+
+  setInterval(broadcastSwarmHeartbeat, 3000);
+  setTimeout(broadcastSwarmHeartbeat, 500);
+
+  function getSwarmFollowerCount() {
+    const now = Date.now();
+    let followers = 0;
+    for (const [id, peer] of activeSwarmPeers.entries()) {
+      if (now - peer.time <= 7500 && peer.role === "follower") {
+        followers++;
+      }
+    }
+    return followers;
+  }
+
+  function updateSwarmInfoUI() {
+    const badge = $("#atd-role-badge");
+    if (badge) {
+      badge.className = `atd-role-badge ${swarmRole}`;
+      badge.textContent = swarmRole === "master" ? "👑 Chủ trì (Master)" : "🤝 Trợ lực (Follower)";
+    }
+    const statusBar = $("#atd-swarm-status-bar");
+    if (!statusBar) return;
+
+    if (swarmRole === "master") {
+      const followers = getSwarmFollowerCount();
+      const totalSquad = followers + 1;
+      const isEnough = totalSquad >= minPeersToBow;
+      statusBar.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+          <span>👥 Đang kết nối: <b style="color:#34d399;">${followers}</b> đệ tử trợ lực (Tổng đoàn: <b>${totalSquad}</b> ng)</span>
+          <span style="color:${isEnough ? '#34d399' : '#e5bc72'}; font-weight:600; font-size:10.5px;">
+            ${isEnough ? '✅ Đủ mốc ≥' + minPeersToBow : '⏳ Chờ thêm để đủ ≥' + minPeersToBow}
+          </span>
+        </div>
+      `;
+    } else {
+      statusBar.innerHTML = `
+        <span style="color:#d1fae5;">🤝 Đang túc trực Chánh điện · Chờ lệnh lạy đồng loạt từ Tab Chủ trì</span>
+      `;
+    }
+  }
+
+  function setSwarmRole(role) {
+    swarmRole = role;
+    sessionStorage.setItem("atd_swarm_role", role);
+    if (role === "follower") {
+      minPeersToBow = 1;
+    } else {
+      minPeersToBow = Number(localStorage.getItem("atd_dt_min") || "5");
+    }
+    broadcastSwarmHeartbeat();
+    updateSwarmInfoUI();
+    const btnMaster = $("#atd-role-btn-master");
+    const btnFollower = $("#atd-role-btn-follower");
+    if (btnMaster && btnFollower) {
+      btnMaster.classList.toggle("active", role === "master");
+      btnFollower.classList.toggle("active", role === "follower");
+    }
+    log(`Đã chuyển vai trò Tab: ${role === "master" ? "👑 Tab Chủ trì (Master)" : "🤝 Tab Trợ lực (Follower)"}`, "ok");
+  }
+
   if (swarmChannel) {
     swarmChannel.onmessage = (event) => {
       const data = event.data;
       if (!data || data.from === TAB_ID) return;
+
+      const now = Date.now();
+
+      // 1. Nhận nhịp tim từ các tab trong Swarm
+      if (data.type === "SWARM_HEARTBEAT") {
+        activeSwarmPeers.set(data.from, { role: data.role, time: now });
+        updateSwarmInfoUI();
+        return;
+      }
+
+      // 2. Tab Trợ lực (Follower) nhận lệnh LẠY trực tiếp từ Tab Chủ trì (Master)
+      if (data.type === "MASTER_BOW_COMMAND") {
+        if (swarmRole === "follower") {
+          log("👑 Nhận lệnh Lạy từ Tab Chủ trì (Master) -> Lập tức lạy cùng!", "ok");
+          triggerBowAction();
+        }
+        return;
+      }
+
+      // 3. Xử lý sóng lạy đồng tâm từ các tab khác
       if (data.type === "SWARM_BOW" && autoDongTam) {
-        const now = Date.now();
         const peerId = `Tab_${data.from}`;
         peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
         peerBowEvents.push({ id: peerId, time: now });
         lastPeerBowTime = now;
+
+        // Nếu là Tab Trợ lực: luôn sẵn sàng lạy theo nhịp
+        if (swarmRole === "follower") {
+          triggerBowAction();
+          return;
+        }
 
         const count = peerBowEvents.length;
         if (count >= minPeersToBow) {
@@ -1164,22 +1275,43 @@
     const ok = await teleportToPlace(PLACES.CHANH_DIEN, "Chánh điện", myRun);
     if (!ok) return false;
 
-    // Nếu người dùng CHỈ BẬT DUY NHẤT 1 tác vụ "Lạy đồng tâm" (1/18):
+    // Nếu người dùng CHỈ BẬT DUY NHẤT 1 tác vụ "Lạy đồng tâm":
     // Cho nhân vật đứng túc trực yên tại Chánh điện, liên tục lắng nghe người khác lạy & Swarm, KHÔNG dịch chuyển lại
     if (enabledTasks.size === 1 && enabledTasks.has("dongtam")) {
-      log(`Chế độ Túc trực Chánh điện: Đang canh sóng lạy đông người (chỉ lạy khi đủ ≥${minPeersToBow} người cùng lạy)…`, "ok");
-      setStatus(`Túc trực Chánh điện · Chờ sóng lạy ≥${minPeersToBow} người`);
+      log(`Chế độ Túc trực Chánh điện: ${swarmRole === "master" ? "👑 Tab Chủ trì chỉ huy sóng lạy (≥" + minPeersToBow + " người)" : "🤝 Tab Trợ lực túc trực tuân lệnh Chủ trì"}…`, "ok");
+      setStatus(`Túc trực Chánh điện · ${swarmRole === "master" ? "Chủ trì canh sóng ≥" + minPeersToBow : "Chờ lệnh từ Chủ trì"}`);
 
       let waitSeconds = 0;
+      let lastSquadLeadBowTime = 0;
+
       while (running && myRun === runId) {
         if (!checkRun(myRun)) return false;
 
         await sleep(1000, myRun);
         waitSeconds++;
 
-        if (waitSeconds % 5 === 0) {
-          const recent = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
-          setStatus(`Túc trực Chánh điện (${waitSeconds}s) · Sóng hiện tại: ${recent}/${minPeersToBow} người`);
+        if (swarmRole === "master") {
+          const followers = getSwarmFollowerCount();
+          const totalSquad = followers + 1;
+          const now = Date.now();
+
+          // NẾU ĐOÀN SWARM ĐÃ CÓ ĐỦ QUÂN SỐ (1 Master + Followers >= minPeersToBow):
+          // Master tự động dẫn đầu phát động nhịp lạy đồng loạt mỗi 12 giây!
+          if (totalSquad >= minPeersToBow && now - lastSquadLeadBowTime >= 12000 && now - lastOwnBowTime >= 5000) {
+            log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người -> Chủ trì phát động nhịp lạy đồng tâm!`, "ok");
+            lastSquadLeadBowTime = now;
+            triggerBowAction();
+          }
+
+          if (waitSeconds % 4 === 0) {
+            const recent = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+            setStatus(`👑 Chủ trì (${waitSeconds}s) · Đoàn: ${totalSquad} ng · Sóng: ${recent}/${minPeersToBow}`);
+          }
+        } else {
+          // Tab Follower: Túc trực Chánh điện chờ lệnh
+          if (waitSeconds % 5 === 0) {
+            setStatus(`🤝 Trợ lực (${waitSeconds}s) · Túc trực Chánh điện chờ lệnh Chủ trì`);
+          }
         }
 
         // Định kỳ kiểm tra nếu nhân vật chưa ở Chánh điện (hoặc bị chuyển cảnh ra ngoài) thì dịch chuyển vào lại
@@ -1198,11 +1330,23 @@
     const startWait = Date.now();
     let caught = false;
 
+    // Kiểm tra nếu Tab Master đã có đủ quân số Swarm ngay từ đầu:
+    if (swarmRole === "master") {
+      const followers = getSwarmFollowerCount();
+      if (followers + 1 >= minPeersToBow) {
+        log(`👑 Tab Chủ trì: Đã có sẵn ${followers + 1}/${minPeersToBow} người trong đoàn Swarm -> Phát động lạy ngay!`, "ok");
+        caught = true;
+      }
+    }
+
     // Chờ tối đa 12 giây xem có gom đủ số người trong điện cùng lạy không
-    while (Date.now() - startWait < 12000) {
+    while (!caught && Date.now() - startWait < 12000) {
       if (!checkRun(myRun)) return false;
-      const count = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
-      if (count >= minPeersToBow || (minPeersToBow === 1 && lastPeerBowTime > prevBow)) {
+      const recentPeers = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
+      const followers = swarmRole === "master" ? getSwarmFollowerCount() : 0;
+      const effectiveCount = recentPeers + (followers > 0 ? followers + 1 : 0);
+
+      if (effectiveCount >= minPeersToBow || (minPeersToBow === 1 && lastPeerBowTime > prevBow)) {
         caught = true;
         break;
       }
@@ -1213,13 +1357,11 @@
       const curCount = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
       log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã khớp sóng ${curCount >= minPeersToBow ? curCount : minPeersToBow} người cùng lạy -> Thực hiện lạy đồng tâm!`, "ok");
       triggerBowAction();
-      broadcastSwarmBow();
       await sleep(5800, myRun);
 
       if (minPeersToBow <= 2) {
         log("Thực hiện thêm nhịp lạy đồng tâm #2…", "ok");
         triggerBowAction();
-        broadcastSwarmBow();
         await sleep(5800, myRun);
       }
       log("Hoàn tất chuỗi lạy đồng tâm.", "ok");
@@ -2698,16 +2840,36 @@
                 </div>
               </div>
             </div>
+            <div class="atd-swarm-role-box" id="atd-swarm-role-box">
+              <div class="atd-role-header">
+                <span>👑 <b>Vai trò Tab trong Swarm</b>:</span>
+                <span class="atd-role-badge ${swarmRole}" id="atd-role-badge">
+                  ${swarmRole === 'master' ? '👑 Chủ trì (Master)' : '🤝 Trợ lực (Follower)'}
+                </span>
+              </div>
+              <div class="atd-role-selector">
+                <button type="button" class="atd-role-chip ${swarmRole === 'master' ? 'active' : ''}" id="atd-role-btn-master" title="Đặt tab này làm Tab Chính (Nhạc trưởng). Khi tab này lạy, toàn bộ các tab khác sẽ lạy theo!">
+                  👑 Tab Chủ trì (Master)
+                </button>
+                <button type="button" class="atd-role-chip ${swarmRole === 'follower' ? 'active' : ''}" id="atd-role-btn-follower" title="Đặt tab này làm Tab Trợ lực. Tab này sẽ túc trực ở Chánh điện và tuân lệnh lạy từ Tab Chủ trì!">
+                  🤝 Tab Trợ lực (Follower)
+                </button>
+              </div>
+              <div class="atd-swarm-status-bar" id="atd-swarm-status-bar"></div>
+            </div>
             <div class="atd-clone-ctrl-box" id="atd-clone-ctrl-box">
               <div class="atd-clone-title">
                 <span>👥 <b>Nhân bản Tab Clone (Swarm đa tab)</b>:</span>
               </div>
               <div class="atd-clone-btns">
                 <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab Clone mới độc lập danh tính để cùng lạy">
-                  👥 +1 Clone lạy cùng
+                  👥 +1 Clone
                 </button>
                 <button type="button" class="atd-clone-btn highlight" id="atd-btn-add-3clones" title="Mở nhanh 3 tab Clone tự vào Chánh điện túc trực lạy">
                   🚀 Mở 3 Clone
+                </button>
+                <button type="button" class="atd-clone-btn lead" id="atd-btn-lead-bow" title="Phát lệnh cho toàn bộ các tab Clone trong Chánh điện cùng lạy ngay lập tức">
+                  🙏 Lạy cả đoàn
                 </button>
               </div>
             </div>
@@ -2840,6 +3002,10 @@
       if (cloneBox) {
         cloneBox.style.display = (catId === "all" || catId === "huong") ? "flex" : "none";
       }
+      const roleBox = $("#atd-swarm-role-box", panel);
+      if (roleBox) {
+        roleBox.style.display = (catId === "all" || catId === "huong") ? "flex" : "none";
+      }
     }
 
     const btnHacTron = $("#atd-btn-hac-tron", panel);
@@ -2857,6 +3023,21 @@
     const btnAdd3Clones = $("#atd-btn-add-3clones", panel);
     if (btnAdd3Clones) {
       btnAdd3Clones.addEventListener("click", () => openMultipleClones(3));
+    }
+    const btnLeadBow = $("#atd-btn-lead-bow", panel);
+    if (btnLeadBow) {
+      btnLeadBow.addEventListener("click", () => {
+        log("👑 Tab Chủ trì phát động lạy đồng loạt cho toàn đoàn Swarm…", "ok");
+        triggerBowAction();
+      });
+    }
+    const btnRoleMaster = $("#atd-role-btn-master", panel);
+    if (btnRoleMaster) {
+      btnRoleMaster.addEventListener("click", () => setSwarmRole("master"));
+    }
+    const btnRoleFollower = $("#atd-role-btn-follower", panel);
+    if (btnRoleFollower) {
+      btnRoleFollower.addEventListener("click", () => setSwarmRole("follower"));
     }
 
     $$(".atd-task-tab", panel).forEach((tab) => {
@@ -2921,6 +3102,7 @@
 
     updateTagUI();
     updateTodayStatsUI();
+    updateSwarmInfoUI();
     setTimeout(queryServerMerit, 1500);
 
     if (isCloneTab) {
