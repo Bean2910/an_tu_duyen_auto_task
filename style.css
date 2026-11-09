@@ -767,3 +767,65 @@
   border-color: rgba(229, 188, 114, 0.45);
   color: #fcefd2;
 }
+
+/* --- Clone Tab Swarm Controls (Đa tab / Ẩn danh / Profile) --- */
+.atd-clone-ctrl-box {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(52, 211, 153, 0.06);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.atd-clone-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #34d399;
+}
+.atd-clone-title b {
+  color: #fff;
+}
+.atd-clone-btns {
+  display: flex;
+  gap: 6px;
+}
+.atd-clone-btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: #d1fae5;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.atd-clone-btn:hover {
+  background: rgba(52, 211, 153, 0.2);
+  border-color: #34d399;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(52, 211, 153, 0.2);
+}
+.atd-clone-btn:active {
+  transform: translateY(0);
+}
+.atd-clone-btn.highlight {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.25) 0%, rgba(16, 185, 129, 0.35) 100%);
+  border-color: #34d399;
+  color: #fff;
+}
+.atd-clone-btn.highlight:hover {
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.4) 0%, rgba(16, 185, 129, 0.5) 100%);
+  box-shadow: 0 3px 10px rgba(52, 211, 153, 0.3);
+}

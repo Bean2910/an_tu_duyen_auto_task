@@ -2,6 +2,58 @@
   if (window.__ATD_AUTO_TASK_LOADED__) return;
   window.__ATD_AUTO_TASK_LOADED__ = true;
 
+  // --- CHẾ ĐỘ PHÂN TÁCH DANH TÍNH ĐA TAB / CLONE TAB (?clone=1, ?clone=2, ...) ---
+  const urlParams = new URLSearchParams(window.location.search);
+  const currentCloneId = urlParams.get("clone");
+  const isCloneTab = Boolean(currentCloneId);
+
+  if (isCloneTab) {
+    try {
+      const prefix = `atd_clone_${currentCloneId}_`;
+      const origGet = Storage.prototype.getItem;
+      const origSet = Storage.prototype.setItem;
+      const origRemove = Storage.prototype.removeItem;
+
+      const isolatedKeys = new Set([
+        "anduyen.cid",
+        "anduyen.profile",
+        "anduyen.adopt",
+        "anduyen.today",
+        "anduyen.bag.xam",
+        "anduyen.bag.words",
+        "atd_tasks",
+        "atd_done_once"
+      ]);
+
+      Storage.prototype.getItem = function(key) {
+        if (this === window.localStorage && isolatedKeys.has(key)) {
+          return sessionStorage.getItem(prefix + key);
+        }
+        return origGet.apply(this, arguments);
+      };
+
+      Storage.prototype.setItem = function(key, val) {
+        if (this === window.localStorage && isolatedKeys.has(key)) {
+          return sessionStorage.setItem(prefix + key, String(val));
+        }
+        return origSet.apply(this, arguments);
+      };
+
+      Storage.prototype.removeItem = function(key) {
+        if (this === window.localStorage && isolatedKeys.has(key)) {
+          return sessionStorage.removeItem(prefix + key);
+        }
+        return origRemove.apply(this, arguments);
+      };
+
+      console.log(`[AutoTask] Đã kích hoạt Clone Tab #${currentCloneId} · Phân tách tài khoản độc lập!`);
+      const origDocTitle = document.title;
+      document.title = `[Clone #${currentCloneId}] ${origDocTitle || "An Tự Duyên"}`;
+    } catch (e) {
+      console.warn("[AutoTask] Clone storage hook error:", e);
+    }
+  }
+
   // --- HỆ THỐNG ĐỒNG BỘ LẠY ĐỒNG TÂM & BẮT NHỊP WEBSOCKET SWARM ---
   const TAB_ID = Math.random().toString(36).slice(2, 8);
   const swarmChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("atd_swarm_sync") : null;
@@ -12,7 +64,7 @@
   let currentZone = "";
   let lastKnownPlace = "";
   let peerBowEvents = [];
-  let minPeersToBow = Number(localStorage.getItem("atd_dt_min") || "2");
+  let minPeersToBow = isCloneTab ? 1 : Number(localStorage.getItem("atd_dt_min") || "2");
   let lastLandedCraneTime = 0;
   let lastHacData = null;
 
@@ -59,6 +111,29 @@
         }
       }
     };
+  }
+
+  // Quản lý mở các Tab Clone (độc lập tài khoản) để cùng túc trực Chánh điện & Lạy đồng tâm
+  let nextCloneCounter = 1;
+  function openNewCloneTab(specificIndex) {
+    const id = specificIndex || nextCloneCounter++;
+    const targetUrl = new URL(window.location.href);
+    targetUrl.searchParams.set("clone", String(id));
+    const curRoom = targetUrl.searchParams.get("phong");
+    if (!curRoom) {
+      targetUrl.searchParams.set("phong", "chua1");
+    }
+    window.open(targetUrl.toString(), "_blank");
+    log(`👥 Đã mở Tab Clone #${id} (độc lập danh tính) · Tự động vào Chánh điện lạy cùng!`, "ok");
+  }
+
+  function openMultipleClones(total = 3) {
+    log(`🚀 Đang mở ${total} Tab Clone độc lập danh tính vào Chánh điện…`, "step");
+    for (let i = 1; i <= total; i++) {
+      setTimeout(() => {
+        openNewCloneTab(i);
+      }, (i - 1) * 700);
+    }
   }
 
   // Danh mục phân loại tác vụ cho hệ thống Tabs
@@ -2550,8 +2625,8 @@
             </svg>
           </div>
           <div>
-            <strong>An Tự Duyên · Auto 2.0</strong>
-            <small>Tự động di chuyển & làm trọn nhiệm vụ</small>
+            <strong>An Tự Duyên · Auto 2.0 ${isCloneTab ? `<span style="color:#34d399;font-size:11px;font-weight:600;">[Clone #${currentCloneId}]</span>` : ''}</strong>
+            <small>${isCloneTab ? 'Tab Clone · Tự động túc trực lạy đồng tâm' : 'Tự động di chuyển & làm trọn nhiệm vụ'}</small>
           </div>
         </div>
         <button id="atd-min" title="Thu gọn bảng điều khiển" aria-label="Thu gọn">−</button>
@@ -2621,6 +2696,19 @@
                   <input type="number" id="atd-dt-input" min="1" max="99" value="${minPeersToBow}" title="Nhập số người cần canh lạy cùng lúc">
                   <button type="button" id="atd-dt-inc" title="Tăng 1 người">+</button>
                 </div>
+              </div>
+            </div>
+            <div class="atd-clone-ctrl-box" id="atd-clone-ctrl-box">
+              <div class="atd-clone-title">
+                <span>👥 <b>Nhân bản Tab Clone (Swarm đa tab)</b>:</span>
+              </div>
+              <div class="atd-clone-btns">
+                <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab Clone mới độc lập danh tính để cùng lạy">
+                  👥 +1 Clone lạy cùng
+                </button>
+                <button type="button" class="atd-clone-btn highlight" id="atd-btn-add-3clones" title="Mở nhanh 3 tab Clone tự vào Chánh điện túc trực lạy">
+                  🚀 Mở 3 Clone
+                </button>
               </div>
             </div>
             <div class="atd-hac-quick-box" id="atd-hac-quick-box">
@@ -2748,6 +2836,10 @@
       if (hacBox) {
         hacBox.style.display = (catId === "all" || catId === "linhvat") ? "flex" : "none";
       }
+      const cloneBox = $("#atd-clone-ctrl-box", panel);
+      if (cloneBox) {
+        cloneBox.style.display = (catId === "all" || catId === "huong") ? "flex" : "none";
+      }
     }
 
     const btnHacTron = $("#atd-btn-hac-tron", panel);
@@ -2757,6 +2849,14 @@
     const btnHacDua = $("#atd-btn-hac-dua", panel);
     if (btnHacDua) {
       btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
+    }
+    const btnAddClone = $("#atd-btn-add-clone", panel);
+    if (btnAddClone) {
+      btnAddClone.addEventListener("click", () => openNewCloneTab());
+    }
+    const btnAdd3Clones = $("#atd-btn-add-3clones", panel);
+    if (btnAdd3Clones) {
+      btnAdd3Clones.addEventListener("click", () => openMultipleClones(3));
     }
 
     $$(".atd-task-tab", panel).forEach((tab) => {
@@ -2822,6 +2922,21 @@
     updateTagUI();
     updateTodayStatsUI();
     setTimeout(queryServerMerit, 1500);
+
+    if (isCloneTab) {
+      enabledTasks.clear();
+      enabledTasks.add("dongtam");
+      loopMode = true;
+      autoDongTam = true;
+      minPeersToBow = 1;
+      updateTagUI();
+      log(`[Clone #${currentCloneId}] Đã nhận diện Tab Clone. Chờ 3.5s để tự động di chuyển vào Chánh điện túc trực lạy cùng…`, "ok");
+      setTimeout(() => {
+        if (!isRunning) {
+          start();
+        }
+      }, 3500);
+    }
 
     // Trạng thái ban đầu: nếu người dùng chưa mở thì mặc định thu gọn thành nút tròn (#atd-fab)
     const initiallyCollapsed = localStorage.getItem("atd_collapsed") !== "0";
