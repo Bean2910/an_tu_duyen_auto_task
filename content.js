@@ -59,47 +59,70 @@
     };
   }
 
-  // Danh sách nhiệm vụ đầy đủ khớp với giao thức & kiểm tra trạng thái trong src.js
-  const ALL_TASKS = [
-    { id: "thoikhoa", label: "Thời khóa", once: true },
-    { id: "tangkinh", label: "Tàng Kinh Các", once: true },
-    { id: "incense", label: "Hương & Lạy", once: false },
-    { id: "dongtam", label: "Lạy đồng tâm", once: false },
-    { id: "qa_incense", label: "Hương Quan Âm", once: true },
-    { id: "am_incense", label: "Hương Am riêng", once: true },
-    { id: "bell", label: "Thỉnh chuông", once: true },
-    { id: "lamp", label: "Thắp đèn", once: true },
-    { id: "garden", label: "Vườn hoa & Dâng hoa", once: true },
-    { id: "quet", label: "Quét lá", once: true },
-    { id: "ca", label: "Phóng sinh", once: true },
-    { id: "hoadang", label: "Hoa đăng", once: true },
-    { id: "xinxam", label: "Xin xăm", once: true },
-    { id: "linhthu", label: "Vườn Linh Thú", once: true },
-    { id: "thaydo", label: "Xin chữ", once: true },
-    { id: "mo", label: "Gõ mõ", once: false },
-    { id: "beads", label: "Chuỗi hạt", once: false },
-    { id: "claim", label: "Nhận thưởng", once: false }
+  // Danh mục phân loại tác vụ cho hệ thống Tabs
+  const TASK_CATEGORIES = [
+    { id: "all", label: "🌟 Tất cả" },
+    { id: "tutap", label: "📿 Tu tập" },
+    { id: "huong", label: "🕯️ Hương & Lạy" },
+    { id: "congqua", label: "🌸 Công quả" },
+    { id: "linhvat", label: "🐾 Linh thú" }
   ];
 
-  // Chỉ mục địa điểm trong mảng As của src.js (Menu -> Bản đồ)
+  // Danh sách nhiệm vụ đầy đủ khớp với giao thức & bản cập nhật mới nhất (main-C2FINDTG.js)
+  const ALL_TASKS = [
+    // 📿 Tu tập & Khóa lễ
+    { id: "thoikhoa", label: "Thời khóa", category: "tutap", once: true },
+    { id: "tangkinh", label: "Tàng Kinh Các", category: "tutap", once: true },
+    { id: "mo", label: "Gõ mõ", category: "tutap", once: false },
+    { id: "beads", label: "Chuỗi hạt", category: "tutap", once: false },
+    { id: "claim", label: "Nhận thưởng", category: "tutap", once: false },
+
+    // 🕯️ Lễ bái & Hương
+    { id: "incense", label: "Hương & Lạy", category: "huong", once: false },
+    { id: "dongtam", label: "Lạy đồng tâm", category: "huong", once: false },
+    { id: "san_incense", label: "Hương Sân chùa", category: "huong", once: true },
+    { id: "qa_incense", label: "Hương Quan Âm", category: "huong", once: true },
+    { id: "am_incense", label: "Hương Am riêng", category: "huong", once: true },
+    { id: "bell", label: "Thỉnh chuông", category: "huong", once: true },
+    { id: "lamp", label: "Thắp đèn", category: "huong", once: true },
+
+    // 🌸 Công quả & Duyên lành
+    { id: "garden", label: "Vườn hoa & Dâng hoa", category: "congqua", once: true },
+    { id: "quet", label: "Quét lá", category: "congqua", once: true },
+    { id: "ca", label: "Phóng sinh", category: "congqua", once: true },
+    { id: "hoadang", label: "Hoa đăng", category: "congqua", once: true },
+    { id: "xinxam", label: "Xin xăm", category: "congqua", once: true },
+    { id: "thaydo", label: "Xin chữ", category: "congqua", once: true },
+    { id: "hoavang", label: "Hóa vàng", category: "congqua", once: true },
+
+    // 🐾 Linh thú & Dạo cảnh
+    { id: "linhthu", label: "Vườn Linh Thú", category: "linhvat", once: true },
+    { id: "choan", label: "Cho ăn thú", category: "linhvat", once: true },
+    { id: "cuoitrau", label: "Cưỡi trâu", category: "linhvat", once: true }
+  ];
+
+  // Chỉ mục địa điểm trong mảng Zi của main-C2FINDTG.js (Menu -> Bản đồ)
   const PLACES = {
     CONG_TAM_QUAN: 0,
-    SAN_CHUA: 1,
-    CHANH_DIEN: 2,
-    BAO_THAP: 3,
-    HO_SEN: 4,
-    VUON_THIEN: 5,
-    GAC_CHUONG: 6,
-    THAP_NGHI: 7,
-    AM_RIENG: 8,
-    PHAP_DUONG: 9,
-    TANG_KINH_CAC: 10,
-    THAY_DO: 11,
-    GIENG_NGOC: 12,
-    TUONG_DI_LAC: 13,
-    DEN_NGUYET_LAO: 14,
-    VUON_LINH_THU: 15,
-    VUON_HOA: 16
+    HAC_TRANG: 1,
+    BAI_CHAN_TRAU: 2,
+    RUA_THAN: 3,
+    SAN_CHUA: 4,
+    CHANH_DIEN: 5,
+    BAO_THAP: 6,
+    HO_SEN: 7,
+    VUON_THIEN: 8,
+    GAC_CHUONG: 9,
+    THAP_NGHI: 10,
+    AM_RIENG: 11,
+    PHAP_DUONG: 12,
+    TANG_KINH_CAC: 13,
+    THAY_DO: 14,
+    GIENG_NGOC: 15,
+    TUONG_DI_LAC: 16,
+    DEN_NGUYET_LAO: 17,
+    VUON_LINH_THU: 18,
+    VUON_HOA: 19
   };
 
   const todayDateStr = () => new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
@@ -577,59 +600,73 @@
   function isAlreadyAtPlace(placeIdx, placeName) {
     const pName = norm(placeName || "");
 
-    // 1. Chánh điện
+    // 1. Chánh điện: Bắt buộc phải có nút "Lạy" và một trong các nút đặc trưng trong điện (hương/đèn/tụng kinh/dâng hoa)
     if (placeIdx === PLACES.CHANH_DIEN || pName.includes("chanh dien")) {
       if (findActionBtn("Lạy") && (findActionBtn("Thắp hương") || findActionBtn("Thắp đèn") || findActionBtn("Tụng kinh") || findActionBtn("Dâng hoa"))) {
         return true;
       }
-      if (currentZone && norm(currentZone).includes("chanh dien")) return true;
+      if (currentZone && norm(currentZone).includes("chanh dien") && findActionBtn("Lạy")) return true;
+      return false;
     }
 
     // 2. Gác chuông
     if (placeIdx === PLACES.GAC_CHUONG || pName.includes("chuong")) {
       if (findActionBtn("Thỉnh chuông")) return true;
       if (currentZone && norm(currentZone).includes("chuong")) return true;
+      return false;
     }
 
     // 3. Vườn hoa
     if (placeIdx === PLACES.VUON_HOA || pName.includes("vuon hoa")) {
       if (findActionBtn("Luống hoa")) return true;
       if (currentZone && norm(currentZone).includes("vuon hoa")) return true;
+      return false;
     }
 
     // 4. Hồ sen · Cầu Duyên
     if (placeIdx === PLACES.HO_SEN || pName.includes("ho sen")) {
-      if (findActionBtn("Thả hoa đăng") || findActionBtn("Xin xăm") || findActionBtn("Kết duyên")) return true;
+      if (findActionBtn("Thả hoa đăng") || findActionBtn("Xin xăm") || findActionBtn("Kết duyên") || findActionBtn("Phóng sinh")) return true;
       if (currentZone && norm(currentZone).includes("ho sen")) return true;
+      return false;
     }
 
     // 5. Vườn Linh Thú
     if (placeIdx === PLACES.VUON_LINH_THU || pName.includes("linh thu")) {
       if (findActionBtn("Linh thú")) return true;
       if (currentZone && norm(currentZone).includes("linh thu")) return true;
+      return false;
     }
 
     // 6. Bàn thầy đồ (Xin chữ)
     if (placeIdx === PLACES.THAY_DO || pName.includes("xin chu") || pName.includes("thay do")) {
       if (findActionBtn("Xin chữ")) return true;
+      if (currentZone && norm(currentZone).includes("thay do")) return true;
+      return false;
     }
 
     // 7. Tàng Kinh Các
     if (placeIdx === PLACES.TANG_KINH_CAC || pName.includes("tang kinh")) {
       if (findActionBtn("Vào Tàng Kinh Các") || $(".lib.tk.open")) return true;
+      if (currentZone && norm(currentZone).includes("tang kinh")) return true;
+      return false;
     }
 
     // 8. Am riêng
     if (placeIdx === PLACES.AM_RIENG || pName.includes("am")) {
       if (findActionBtn("Ra khỏi am")) return true;
       if (currentZone && norm(currentZone).includes("am rieng")) return true;
+      return false;
     }
 
-    // 9. So khớp qua currentZone hoặc lastKnownPlace
-    if (currentZone && pName && norm(currentZone) === pName) {
-      return true;
+    // 9. Sân chùa
+    if (placeIdx === PLACES.SAN_CHUA || pName.includes("san chua")) {
+      if (findActionBtn("Quét lá")) return true;
+      if (currentZone && norm(currentZone).includes("san chua")) return true;
+      return false;
     }
-    if (lastKnownPlace && pName && norm(lastKnownPlace) === pName) {
+
+    // 10. So khớp qua currentZone
+    if (currentZone && pName && norm(currentZone) === pName) {
       return true;
     }
 
@@ -656,23 +693,66 @@
       log("Không mở được Bản đồ.", "warn");
       return false;
     }
-    let target = $(`[data-place="${placeIdx}"]`, mapSheet);
-    if (!target && placeName) {
-      const pNorm = norm(placeName);
-      target = $$("[data-place]", mapSheet).find((el) =>
-        norm(el.textContent || el.getAttribute("title")).includes(pNorm)
-      );
+
+    let target = null;
+    const pNorm = norm(placeName || "");
+
+    // 1. ƯU TIÊN HÀNG ĐẦU: Tìm theo tên địa điểm trên bản đồ SVG (aria-label="Đi tới ...", textContent, title)
+    // Giúp tự động thích ứng nếu game tiếp tục cập nhật/chèn thêm địa điểm mới trong tương lai
+    if (pNorm) {
+      const candidates = $$("[data-place]", mapSheet);
+      target = candidates.find((el) => {
+        const aria = norm(el.getAttribute("aria-label") || "");
+        const txt = norm(el.textContent || "");
+        const title = norm(el.getAttribute("title") || "");
+        return aria.includes(pNorm) || txt.includes(pNorm) || title.includes(pNorm);
+      });
+      if (!target && pNorm.includes("chanh dien")) {
+        target = candidates.find((el) => {
+          const aria = norm(el.getAttribute("aria-label") || "");
+          const txt = norm(el.textContent || "");
+          return aria.includes("chanh dien") || txt.includes("chanh dien");
+        });
+      }
+      if (!target && pNorm.includes("ho sen")) {
+        target = candidates.find((el) => {
+          const aria = norm(el.getAttribute("aria-label") || "");
+          const txt = norm(el.textContent || "");
+          return aria.includes("ho sen") || txt.includes("ho sen");
+        });
+      }
     }
+
+    // 2. Dự phòng tìm qua data-place index nếu không khớp tên
+    if (!target && typeof placeIdx === "number") {
+      target = $(`[data-place="${placeIdx}"]`, mapSheet);
+    }
+
     if (!target) {
       fireClick($(".sheet-close", mapSheet));
       log(`Không tìm thấy điểm đến "${placeName}" trên Bản đồ.`, "warn");
       return false;
     }
+
     fireClick(target);
     lastKnownPlace = placeName;
     log(`Di chuyển tới: ${placeName}`, "info");
+
     // Chờ hiệu ứng chuyển cảnh (420ms) + đồng bộ gói { t: "visit" } và { t: "state" }
     await sleep(1000, myRun);
+
+    // Xác nhận đã tới Chánh điện thành công (chờ nút Lạy xuất hiện trong toolbar)
+    if (pNorm.includes("chanh dien")) {
+      const arrived = await waitFor(
+        () => findActionBtn("Lạy") || (currentZone && norm(currentZone).includes("chanh dien")),
+        3000,
+        myRun
+      );
+      if (!arrived) {
+        log("Cảnh báo: Đang chuyển vào Chánh điện, đợi giao diện tải...", "wait");
+      }
+    }
+
     return true;
   }
 
@@ -853,6 +933,14 @@
           const recent = peerBowEvents.filter((e) => Date.now() - e.time <= 4500).length;
           setStatus(`Túc trực Chánh điện (${waitSeconds}s) · Sóng hiện tại: ${recent}/${minPeersToBow} người`);
         }
+
+        // Định kỳ kiểm tra nếu nhân vật chưa ở Chánh điện (hoặc bị chuyển cảnh ra ngoài) thì dịch chuyển vào lại
+        if (waitSeconds % 12 === 0) {
+          if (!isAlreadyAtPlace(PLACES.CHANH_DIEN, "Chánh điện")) {
+            log("Phát hiện nhân vật chưa ở trong Chánh điện · Tự động di chuyển vào Chánh điện...", "warn");
+            await teleportToPlace(PLACES.CHANH_DIEN, "Chánh điện", myRun);
+          }
+        }
       }
       return true;
     }
@@ -893,6 +981,28 @@
     }
 
     return true;
+  }
+
+  // 3c. Thắp hương tại đại lư hương giữa Sân chùa ({ t: "san-incense" })
+  async function runSanIncense(myRun) {
+    const ok = await teleportToPlace(PLACES.SAN_CHUA, "Sân chùa", myRun);
+    if (!ok) return false;
+
+    // Nút "Thắp hương" giữa sân chùa có id "sanhuong" trong action bar
+    const huongBtn = await waitFor(() => findActionBtn("Thắp hương"), 2000, myRun);
+    if (huongBtn) {
+      fireClick(huongBtn);
+      log("Dâng ba nén hương vào đại lư giữa Sân chùa ({ t: 'san-incense' })…", "ok");
+      await sleep(3500, myRun);
+      return true;
+    } else if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      activeWs.send(JSON.stringify({ t: "san-incense" }));
+      log("Đã gửi gói Thắp hương Sân chùa ({ t: 'san-incense' })…", "ok");
+      await sleep(1500, myRun);
+      return true;
+    }
+    log("Chưa thấy nút Thắp hương tại Sân chùa.", "warn");
+    return false;
   }
 
   // 4. Thắp hương tại Đài Quan Âm ({ t: "qa-incense" })
@@ -1301,18 +1411,111 @@
     return true;
   }
 
-  // 13. Vườn Linh Thú: Cho thú ăn ({ t: "emote", e: "gieo" }, { t: "pet-feed" })
+  // 13. Vườn Linh Thú ({ t: "linhthu" })
   async function runLinhThu(myRun) {
+    const ok = await teleportToPlace(PLACES.VUON_LINH_THU, "Vườn Linh Thú", myRun);
+    if (!ok) return false;
+
+    const petBtn = await waitFor(() => findActionBtn("Linh thú") || findActionBtn("Cho ăn"), 2000, myRun);
+    if (petBtn) {
+      log("Thăm Vườn Linh Thú & tương tác linh thú cưng…", "ok");
+      await sleep(1500, myRun);
+    }
+    return true;
+  }
+
+  // 13b. Cho ăn Linh Thú ({ t: "pet-feed" }, { t: "emote", e: "gieo" })
+  async function runChoAn(myRun) {
     const ok = await teleportToPlace(PLACES.VUON_LINH_THU, "Vườn Linh Thú", myRun);
     if (!ok) return false;
 
     const feedBtn = await waitFor(() => findActionBtn("Cho ăn"), 2000, myRun);
     if (feedBtn) {
       fireClick(feedBtn);
-      log("Đã rắc hạt cho linh thú ăn tại Vườn Linh Thú.", "ok");
-      await sleep(1600, myRun);
+      log("Rắc hạt cho các linh thú trong vườn ăn ({ t: 'pet-feed' })…", "ok");
+      await sleep(2200, myRun);
+      return true;
+    } else if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      activeWs.send(JSON.stringify({ t: "emote", e: "gieo" }));
+      await sleep(400, myRun);
+      activeWs.send(JSON.stringify({ t: "pet-feed" }));
+      log("Đã gửi gói Cho ăn linh thú ({ t: 'pet-feed' }).", "ok");
+      await sleep(1500, myRun);
+      return true;
     }
-    return true;
+    return false;
+  }
+
+  // 13c. Cưỡi trâu dạo cảnh Thập Mục Ngưu Đồ ({ t: "lv-cuoi" })
+  async function runCuoiTrau(myRun) {
+    const ok = await teleportToPlace(PLACES.BAI_CHAN_TRAU, "Bãi chăn trâu", myRun);
+    if (!ok) return false;
+
+    const trauBtn = await waitFor(() => findActionBtn("Trâu"), 2500, myRun);
+    if (trauBtn) {
+      fireClick(trauBtn);
+      log("Trải nghiệm cưỡi trâu thong thả đi dạo (Thập Mục Ngưu Đồ)…", "ok");
+      await sleep(3500, myRun);
+
+      const xuongBtn = findActionBtn("Xuống trâu");
+      if (xuongBtn) {
+        fireClick(xuongBtn);
+        await sleep(1000, myRun);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // 13d. Hóa vàng & Hồi hướng gia tiên ({ t: "hoa-vang" }, { t: "hv-hoihuong" })
+  async function runHoaVang(myRun) {
+    await closeAllModals(myRun);
+    let hvBtn = findActionBtn("Hóa vàng");
+    if (!hvBtn) {
+      await teleportToPlace(PLACES.SAN_CHUA, "Sân chùa", myRun);
+      hvBtn = await waitFor(() => findActionBtn("Hóa vàng"), 2000, myRun);
+    }
+
+    if (hvBtn) {
+      fireClick(hvBtn);
+    } else if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      activeWs.send(JSON.stringify({ t: "hoa-vang", k: "vang" }));
+      await sleep(1200, myRun);
+      activeWs.send(JSON.stringify({ t: "hv-hoihuong" }));
+      log("Đã gửi gói Hóa vàng & Hồi hướng gia tiên ({ t: 'hoa-vang' }).", "ok");
+      return true;
+    }
+
+    const panel = await waitFor(() => $(".hv-panel"), 3000, myRun);
+    if (panel) {
+      // 1. Thực hiện Hóa tiền vàng
+      const goldBtn = $('[data-k="vang"]', panel);
+      if (goldBtn && !goldBtn.disabled) {
+        fireClick(goldBtn);
+        await sleep(500, myRun);
+        const allBtn = await waitFor(() => $('[data-act="all"]', $(".hv-panel")), 2000, myRun);
+        if (allBtn) {
+          fireClick(allBtn);
+          log("Đang hóa tiền vàng tưởng nhớ gia tiên ({ t: 'hoa-vang' })…", "ok");
+          await sleep(3500, myRun);
+        }
+      } else {
+        log("Hôm nay đã hóa tiền vàng rồi.", "info");
+      }
+
+      // 2. Thực hiện Hồi hướng công đức
+      const hhBtn = $('[data-act="hh"]', $(".hv-panel") || panel);
+      if (hhBtn && visible(hhBtn)) {
+        fireClick(hhBtn);
+        log("Hồi hướng công đức gia tiên ({ t: 'hv-hoihuong' })…", "ok");
+        await sleep(1500, myRun);
+      }
+
+      fireClick($(".hv-panel .sheet-close"));
+      await sleep(350, myRun);
+      return true;
+    }
+    return false;
   }
 
   // 14. Xin chữ Thầy đồ ({ t: "chu-xin", chu })
@@ -1521,6 +1724,7 @@
     tangkinh: runTangKinh,
     incense: runIncenseChanhDien,
     dongtam: runDongTam,
+    san_incense: runSanIncense,
     qa_incense: runQaIncense,
     am_incense: runAmIncense,
     bell: runBell,
@@ -1530,7 +1734,10 @@
     ca: runPhongSinh,
     hoadang: runHoaDang,
     xinxam: runXinXam,
+    hoavang: runHoaVang,
     linhthu: runLinhThu,
+    choan: runChoAn,
+    cuoitrau: runCuoiTrau,
     thaydo: runThayDo,
     mo: runMo,
     beads: runBeads,
@@ -1682,6 +1889,17 @@
         countEl.textContent = `(${enabledTasks.size}/${ALL_TASKS.length})`;
       }
     }
+
+    TASK_CATEGORIES.forEach((cat) => {
+      const countSpan = $(`#atd-panel [data-tab-count="${cat.id}"]`);
+      if (!countSpan) return;
+      const tasksInCat = cat.id === "all"
+        ? ALL_TASKS
+        : ALL_TASKS.filter((t) => t.category === cat.id);
+      const activeInCat = tasksInCat.filter((t) => enabledTasks.has(t.id)).length;
+      countSpan.textContent = `(${activeInCat})`;
+    });
+
     updateTodayStatsUI();
   }
 
@@ -1982,14 +2200,21 @@
           <div class="atd-config-head">
             <span class="atd-config-title">Tác vụ tự động <span id="atd-task-count">(${enabledTasks.size}/${ALL_TASKS.length})</span></span>
             <div class="atd-mini-btns">
-              <button id="atd-all" type="button">Tất cả</button>
-              <button id="atd-farm" type="button">Chỉ Mõ/Hạt</button>
+              <button id="atd-all" type="button" title="Bật tất cả tác vụ trong tab này">Chọn hết</button>
+              <button id="atd-clear" type="button" title="Bỏ chọn các tác vụ trong tab này">Bỏ chọn</button>
+              <button id="atd-farm" type="button" title="Chỉ bật Mõ & Chuỗi hạt">Chỉ Mõ/Hạt</button>
             </div>
+          </div>
+          <div class="atd-tab-bar" id="atd-task-tabs">
+            ${TASK_CATEGORIES.map(
+              (cat) =>
+                `<button type="button" class="atd-task-tab ${cat.id === "all" ? "active" : ""}" data-tab="${cat.id}">${cat.label} <span class="atd-tab-count" data-tab-count="${cat.id}"></span></button>`
+            ).join("")}
           </div>
           <div class="atd-tags">
             ${ALL_TASKS.map(
               (t) =>
-                `<button type="button" class="atd-tag on" data-task="${t.id}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}">${t.label}</button>`
+                `<button type="button" class="atd-tag on" data-task="${t.id}" data-category="${t.category}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}">${t.label}</button>`
             ).join("")}
           </div>
           <div class="atd-opts">
@@ -2126,10 +2351,45 @@
       setMinPeers(minPeersToBow + 1);
     });
 
+    let currentCategory = "all";
+
+    function filterTagsByCategory(catId) {
+      currentCategory = catId;
+      $$(".atd-task-tab", panel).forEach((tab) => {
+        tab.classList.toggle("active", tab.dataset.tab === catId);
+      });
+      $$(".atd-tag", panel).forEach((tag) => {
+        const cat = tag.dataset.category;
+        if (catId === "all" || cat === catId) {
+          tag.style.display = "";
+        } else {
+          tag.style.display = "none";
+        }
+      });
+    }
+
+    $$(".atd-task-tab", panel).forEach((tab) => {
+      tab.addEventListener("click", () => {
+        filterTagsByCategory(tab.dataset.tab);
+      });
+    });
+
     $("#atd-all", panel).addEventListener("click", () => {
-      ALL_TASKS.forEach((t) => enabledTasks.add(t.id));
+      const targetTasks = currentCategory === "all"
+        ? ALL_TASKS
+        : ALL_TASKS.filter((t) => t.category === currentCategory);
+      targetTasks.forEach((t) => enabledTasks.add(t.id));
       updateTagUI();
     });
+
+    $("#atd-clear", panel).addEventListener("click", () => {
+      const targetTasks = currentCategory === "all"
+        ? ALL_TASKS
+        : ALL_TASKS.filter((t) => t.category === currentCategory);
+      targetTasks.forEach((t) => enabledTasks.delete(t.id));
+      updateTagUI();
+    });
+
     $("#atd-farm", panel).addEventListener("click", () => {
       enabledTasks.clear();
       ["mo", "beads", "incense", "dongtam", "claim"].forEach((id) => enabledTasks.add(id));
