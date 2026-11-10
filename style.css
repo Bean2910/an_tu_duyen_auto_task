@@ -641,7 +641,7 @@
   color: #f6eedb;
   margin-bottom: 6px;
 }
-.atd-today-head button {
+#atd-refresh-today {
   background: none;
   border: none;
   color: #e5bc72;
@@ -651,9 +651,29 @@
   opacity: 0.8;
   transition: transform 0.2s;
 }
-.atd-today-head button:hover {
+#atd-refresh-today:hover {
   opacity: 1;
   transform: rotate(90deg);
+}
+#atd-btn-checkin {
+  background: rgba(229, 188, 114, 0.15);
+  border: 1px solid rgba(229, 188, 114, 0.35);
+  color: #fcefd2;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+#atd-btn-checkin:hover {
+  background: rgba(229, 188, 114, 0.35);
+  border-color: #e5bc72;
+  color: #fff;
+  transform: translateY(-1px);
 }
 .atd-today-grid {
   display: grid;

@@ -665,6 +665,12 @@
       changed = true;
     }
 
+    // 4. Lưu cache gói tin Quà điểm danh ({ t: "checkin" })
+    if (msg.t === "checkin") {
+      lastCheckinData = msg;
+      try { localStorage.setItem("atd_checkin_cache", JSON.stringify(msg)); } catch {}
+    }
+
     if (changed) {
       saveServerChores();
       saveDoneOnce();
@@ -672,6 +678,29 @@
       try { updateTodayStatsUI(); } catch {}
     }
   }
+
+  let lastCheckinData = null;
+  try {
+    const cached = localStorage.getItem("atd_checkin_cache");
+    if (cached) lastCheckinData = JSON.parse(cached);
+  } catch {}
+
+  function openDailyCheckin() {
+    const weekEl = document.querySelector(".sheet.week");
+    if (weekEl) {
+      weekEl.classList.add("open");
+      log("🎁 Đã mở lại bảng Quà điểm danh hằng ngày.", "ok");
+      return true;
+    }
+    if (typeof cb === "function" && lastCheckinData) {
+      cb(lastCheckinData);
+      log("🎁 Đã hiển thị lại bảng Quà điểm danh từ dữ liệu máy chủ.", "ok");
+      return true;
+    }
+    log("⚠️ Không tìm thấy bảng điểm danh. Bạn hãy thử tải lại trang (F5) nhé.", "warn");
+    return false;
+  }
+  window.openDailyCheckin = openDailyCheckin;
 
   function queryServerMerit() {
     try {
@@ -693,6 +722,10 @@
             const data = typeof evt.data === "string" ? JSON.parse(evt.data) : null;
             if (data && data.t === "linhvat" && data.hac) {
               lastHacData = data.hac;
+            }
+            if (data && data.t === "checkin") {
+              lastCheckinData = data;
+              try { localStorage.setItem("atd_checkin_cache", JSON.stringify(data)); } catch {}
             }
           } catch {}
         });
@@ -3101,7 +3134,10 @@
         <div class="atd-today-box">
           <div class="atd-today-head">
             <span>📊 Tiến độ & Ngưỡng hôm nay</span>
-            <button id="atd-refresh-today" type="button" title="Làm mới tiến độ">↻</button>
+            <div class="atd-today-actions" style="display:flex; gap:5px; align-items:center;">
+              <button id="atd-btn-checkin" type="button" title="Mở lại bảng Quà điểm danh hằng ngày">🎁 Quà điểm danh</button>
+              <button id="atd-refresh-today" type="button" title="Làm mới tiến độ">↻</button>
+            </div>
           </div>
           <div class="atd-today-grid" id="atd-today-stats"></div>
         </div>
@@ -3312,6 +3348,10 @@
           log(`Đã đặt lại trạng thái "${btn.textContent.trim()}" để chạy lại hôm nay.`, "info");
         }
       });
+    });
+
+    $("#atd-btn-checkin", panel)?.addEventListener("click", () => {
+      openDailyCheckin();
     });
 
     $("#atd-refresh-today", panel)?.addEventListener("click", () => {
