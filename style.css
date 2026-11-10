@@ -972,3 +972,82 @@
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.5) 0%, rgba(217, 119, 6, 0.65) 100%);
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
 }
+
+/* Tinh chỉnh & dự phòng hiển thị cho Bảng Quà điểm danh hằng ngày (.sheet.week) */
+.sheet.week.open {
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 320px;
+  max-width: 440px;
+  z-index: 99999 !important;
+}
+.sheet.week .week-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+.sheet.week .week-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(229, 188, 114, 0.2);
+  text-align: center;
+  gap: 4px;
+}
+.sheet.week .week-day b {
+  font-size: 11px;
+  color: #cbbfa8;
+}
+.sheet.week .week-day svg {
+  width: 24px;
+  height: 24px;
+  stroke: #e5bc72;
+  color: #e5bc72;
+}
+.sheet.week .week-day span {
+  font-size: 10px;
+  color: #f5eedf;
+  line-height: 1.2;
+}
+.sheet.week .week-day.today {
+  border-color: #e5bc72;
+  background: rgba(229, 188, 114, 0.16);
+  box-shadow: 0 0 10px rgba(229, 188, 114, 0.3);
+}
+.sheet.week .week-day.today b {
+  color: #fbbf24;
+}
+.sheet.week .week-day.done {
+  opacity: 0.55;
+}
+.sheet.week .week-day.rare {
+  grid-column: span 2;
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.1) 100%);
+}
+.sheet.week .week-day.rare b {
+  color: #f59e0b;
+}
+.sheet.week .week-got {
+  margin: 6px 0 4px;
+  font-size: 12.5px;
+  color: #e5bc72;
+  text-align: center;
+  background: rgba(229, 188, 114, 0.08);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px dashed rgba(229, 188, 114, 0.3);
+}
+.sheet.week .week-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.sheet.week .week-foot button {
+  flex: 1;
+}

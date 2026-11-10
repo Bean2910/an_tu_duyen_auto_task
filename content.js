@@ -36,12 +36,13 @@
 
   if (isCloneTab) {
     try {
+      const urlCid = urlParams.get("cid");
       const cloneKey = `atd_clone_uuid_${currentCloneId}`;
-      let storedCid = sessionStorage.getItem(cloneKey);
+      let storedCid = urlCid || sessionStorage.getItem(cloneKey);
       if (!storedCid || storedCid.length !== 36 || storedCid.startsWith("cid_")) {
         storedCid = generateStandardUUID();
-        try { sessionStorage.setItem(cloneKey, storedCid); } catch {}
       }
+      try { sessionStorage.setItem(cloneKey, storedCid); } catch {}
       cloneTabCid = storedCid;
 
       const robes = ["nau", "lam", "xam"];
@@ -90,13 +91,15 @@
   }
 
   // Tự động bỏ qua / bấm "Dùng ở đây" nếu gặp thông báo "Chùa đang mở ở nơi khác"
+  let lastBannedClick = 0;
   try {
     const bannedObserver = new MutationObserver(() => {
       const bannedEl = document.querySelector(".banned");
-      if (bannedEl) {
+      if (bannedEl && Date.now() - lastBannedClick > 3000) {
         const btn = bannedEl.querySelector("button");
-        if (btn) {
-          console.log("[AutoTask] Tự động nhấn 'Dùng ở đây' trên tab Clone...");
+        if (btn && btn.textContent && btn.textContent.includes("Dùng ở đây")) {
+          lastBannedClick = Date.now();
+          console.log("[AutoTask] Tự động nhấn 'Dùng ở đây'...");
           btn.click();
         }
       }
@@ -195,8 +198,8 @@
       time: Date.now()
     });
 
-    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~950ms)
-    const waitLimit = 950;
+    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~1200ms)
+    const waitLimit = 1200;
     const startWait = Date.now();
     while (Date.now() - startWait < waitLimit) {
       const elapsed = Date.now() - startWait;
@@ -318,6 +321,7 @@
     log(`Đã chuyển vai trò Tab: ${role === "master" ? "👑 Tab Chủ trì (Master)" : "🤝 Tab Trợ lực (Follower)"}`, "ok");
   }
 
+  let lastHandledBowSessionId = null;
   function handleSwarmMessage(data) {
     if (!data || data.from === TAB_ID) return;
     const now = Date.now();
@@ -337,6 +341,9 @@
     // 2. Tab Trợ lực (Follower / Clone) nhận lệnh LẠY TRƯỚC từ Tab Chủ trì (Master)
     if (data.type === "CLONES_BOW_FIRST") {
       if (isCloneTab || swarmRole === "follower") {
+        if (data.sessionId && data.sessionId === lastHandledBowSessionId) return;
+        lastHandledBowSessionId = data.sessionId;
+
         log(`👑 [Đệ tử #${currentCloneId || "Trợ lực"}] Nhận lệnh Lạy từ Chủ trì -> Lập tức lạy trước!`, "ok");
         const bowed = triggerDirectBow();
         const myName = `Đệ tử #${currentCloneId || "Trợ lực"}`;
@@ -410,6 +417,9 @@
     const id = specificIndex || nextCloneCounter++;
     const targetUrl = new URL(window.location.href);
     targetUrl.searchParams.set("clone", String(id));
+    // Tạo CID duy nhất cho mỗi tab đệ tử để không bao giờ bị trùng CID hay báo "Chùa đang mở ở nơi khác"
+    const uniqueTabCid = generateStandardUUID();
+    targetUrl.searchParams.set("cid", uniqueTabCid);
     const curRoom = targetUrl.searchParams.get("phong");
     if (!curRoom) {
       targetUrl.searchParams.set("phong", "chua-1");
@@ -418,7 +428,7 @@
     if (!win) {
       log(`⚠️ Trình duyệt chặn Popup! Hãy bấm biểu tượng 🚫 "Cửa sổ bật lên bị chặn" ở góc phải thanh URL và chọn "Luôn cho phép", hoặc bấm nút mở lẻ [#${id}] ở dưới nhé!`, "warn");
     } else {
-      log(`👥 Đã mở Tab Trợ lực [Đệ tử #${id}] · Tự động vào Chánh điện túc trực lạy trợ lực!`, "ok");
+      log(`👥 Đã mở Tab Trợ lực [Đệ tử #${id}] · CID độc lập: ${uniqueTabCid.slice(0, 8)}…`, "ok");
     }
   }
 
@@ -685,20 +695,88 @@
     if (cached) lastCheckinData = JSON.parse(cached);
   } catch {}
 
+  const W_SVG_MERIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 5c2 2.5 2.5 6 0 10-2.5-4-2-7.5 0-10z"/><path d="M12 15c-3-.5-6-3-6.5-6.5 3 0 5.5 2 6.5 6.5zM12 15c3-.5 6-3 6.5-6.5-3 0-5.5 2-6.5 6.5z"/><path d="M5 18h14"/></svg>';
+  const W_SVG_INCENSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21V9M12 21V7M15 21V9"/><path d="M12 5c-1-1.5 1-2 0-3.5M9 7c-1-1.5 1-2 0-3.5M15 7c-1-1.5 1-2 0-3.5"/></svg>';
+  const W_SVG_BEADS = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="4.5" r="2"/><circle cx="17.3" cy="6.7" r="2"/><circle cx="19.5" cy="12" r="2"/><circle cx="17.3" cy="17.3" r="2"/><circle cx="12" cy="19.5" r="2.6"/><circle cx="6.7" cy="17.3" r="2"/><circle cx="4.5" cy="12" r="2"/><circle cx="6.7" cy="6.7" r="2"/></svg>';
+
   function openDailyCheckin() {
-    const weekEl = document.querySelector(".sheet.week");
-    if (weekEl) {
-      weekEl.classList.add("open");
-      log("🎁 Đã mở lại bảng Quà điểm danh hằng ngày.", "ok");
-      return true;
+    let weekEl = document.querySelector(".sheet.week");
+    if (!weekEl) {
+      weekEl = document.createElement("div");
+      weekEl.className = "sheet week";
+      const container = document.getElementById("canvas-container") || document.body;
+      container.appendChild(weekEl);
     }
-    if (typeof cb === "function" && lastCheckinData) {
-      cb(lastCheckinData);
-      log("🎁 Đã hiển thị lại bảng Quà điểm danh từ dữ liệu máy chủ.", "ok");
-      return true;
+
+    // Nếu bảng chưa có cấu trúc nội dung đầy đủ (do máy chủ không gửi { t: "checkin" } khi đã nhận rồi hoặc sau F5)
+    if (!weekEl.querySelector(".week-grid") || !weekEl.querySelector(".week-day")) {
+      const data = lastCheckinData || {};
+      const days = Number(data.days || serverMeritStats?.days || 1);
+      const day = Number(data.day || (((days - 1) % 7) + 1));
+      const gifts = data.gifts && Array.isArray(data.gifts) && data.gifts.length === 7
+        ? data.gifts
+        : [
+            "100 công đức",
+            "3 nén hương",
+            "200 công đức",
+            "3 nén hương",
+            "300 công đức",
+            "3 nén hương",
+            "Tràng hạt mã não"
+          ];
+      const got = data.got || gifts[Math.max(0, day - 1)] || "100 công đức";
+
+      const gridHtml = gifts.map((giftText, idx) => {
+        const d = idx + 1;
+        const icon = d === 7 ? W_SVG_BEADS : (giftText.includes("hương") ? W_SVG_INCENSE : W_SVG_MERIT);
+        const classes = ["week-day"];
+        if (d < day) classes.push("done");
+        if (d === day) classes.push("today");
+        if (d === 7) classes.push("rare");
+        return `<div class="${classes.join(" ")}"><b>Ngày ${d}</b>${icon}<span>${giftText}</span></div>`;
+      }).join("");
+
+      const nextSub = day < 7
+        ? `Lần tới lên chùa bạn nhận quà ngày ${day + 1}.`
+        : "Đã trọn bảy phần quà! Lần tới bắt đầu vòng mới.";
+
+      weekEl.innerHTML = `
+        <button class="sheet-close" aria-label="Đóng">×</button>
+        <div class="sheet-title">Quà điểm danh</div>
+        <p class="sheet-sub">${days > 1 ? `Đây là lần thứ <b>${days}</b> bạn lên chùa.` : "Mỗi ngày lên chùa là một phần quà."} Nghỉ vài hôm cũng không sao, quà vẫn đợi bạn.</p>
+        <div class="week-grid">${gridHtml}</div>
+        <div class="week-got">Hôm nay nhận: <b>${got}</b></div>
+        <p class="sheet-sub">${nextSub}</p>
+        <div class="week-foot">
+          <button class="ghost" data-act="book">Xem Sổ sen</button>
+          <button class="primary" data-act="close">Đóng lại</button>
+        </div>
+      `;
+
+      weekEl.querySelectorAll(".sheet-close, [data-act='close'], .primary").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          weekEl.classList.remove("open");
+        });
+      });
+
+      const bookBtn = weekEl.querySelector('[data-act="book"]');
+      if (bookBtn) {
+        bookBtn.addEventListener("click", () => {
+          weekEl.classList.remove("open");
+          const topBook = document.querySelector(".top-btn.book") || document.querySelector('[data-top="book"]');
+          if (topBook) {
+            topBook.click();
+          } else {
+            const sheetBook = document.querySelector(".sheet.book");
+            if (sheetBook) sheetBook.classList.add("open");
+          }
+        });
+      }
     }
-    log("⚠️ Không tìm thấy bảng điểm danh. Bạn hãy thử tải lại trang (F5) nhé.", "warn");
-    return false;
+
+    weekEl.classList.add("open");
+    log("🎁 Đã hiển thị đầy đủ bảng Quà điểm danh hằng ngày!", "ok");
+    return true;
   }
   window.openDailyCheckin = openDailyCheckin;
 
