@@ -19,6 +19,51 @@
   const currentCloneId = urlParams.get("clone");
   const isCloneTab = Boolean(currentCloneId);
 
+  // Giữ nhịp requestAnimationFrame cho Tab Clone khi chạy nền (tránh bị Chrome dừng hẳn làm kẹt #loading, H.fade và Q.layLeft)
+  if (isCloneTab) {
+    try {
+      const origRAF = window.requestAnimationFrame.bind(window);
+      const origCAF = window.cancelAnimationFrame.bind(window);
+      let rafIdSeed = 100000;
+      const pendingMap = new Map();
+
+      window.requestAnimationFrame = function(callback) {
+        const myId = ++rafIdSeed;
+        let fired = false;
+        let nativeId = 0;
+        const timerId = setTimeout(() => {
+          if (fired) return;
+          fired = true;
+          pendingMap.delete(myId);
+          try { origCAF(nativeId); } catch {}
+          try { callback(performance.now()); } catch {}
+        }, 120);
+
+        nativeId = origRAF((ts) => {
+          if (fired) return;
+          fired = true;
+          pendingMap.delete(myId);
+          clearTimeout(timerId);
+          try { callback(ts); } catch {}
+        });
+
+        pendingMap.set(myId, { nativeId, timerId });
+        return myId;
+      };
+
+      window.cancelAnimationFrame = function(id) {
+        const entry = pendingMap.get(id);
+        if (entry) {
+          pendingMap.delete(id);
+          clearTimeout(entry.timerId);
+          try { origCAF(entry.nativeId); } catch {}
+        } else {
+          try { origCAF(id); } catch {}
+        }
+      };
+    } catch {}
+  }
+
   // Sinh UUID RFC4122 v4 chuẩn 36 ký tự (hợp lệ cho backend validator)
   function generateStandardUUID() {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -115,8 +160,12 @@
   let lastOwnBowTime = 0;
   let autoDongTam = true;
   let currentZone = "";
+  let currentServerRoom = new URLSearchParams(window.location.search).get("phong") || "";
   let lastKnownPlace = "";
   let peerBowEvents = [];
+  let wsSentLayCount = 0;
+  let allowMasterDirectLay = false;
+  let myHallOffset = null;
 
   // Vai trò Swarm: 'master' (Tab Chủ trì) hoặc 'follower' (Tab Trợ lực)
   // Nếu có ?clone= trên URL -> BẮT BUỘC 100% LÀ 'follower'!
@@ -130,30 +179,81 @@
   let lastLandedCraneTime = 0;
   let lastHacData = null;
 
-  // Thực hiện động tác lạy trực tiếp của Tab này
-  function triggerDirectBow() {
-    const now = Date.now();
-    lastOwnBowTime = now;
-    let clicked = false;
-    const layBtn = findActionBtn("Lạy");
-    if (layBtn && !layBtn.disabled) {
-      fireClick(layBtn);
-      clicked = true;
-    }
-    // Luôn đảm bảo gửi gói tin emote lạy qua WebSocket lên server
-    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+  // Đảm bảo đồng bộ vị trí đứng tại Chánh điện (0, 2.4, -3) và zone "Chánh điện" lên Server (kể cả khi tab chạy nền)
+  function syncChanhDienStateToServer() {
+    if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+    try {
+      if (!myHallOffset) {
+        const idx = Number(currentCloneId || 0);
+        const offsets = [
+          { x: 0, z: -3.0 },
+          { x: -1.1, z: -2.8 },
+          { x: 1.1, z: -2.8 },
+          { x: -1.8, z: -3.4 },
+          { x: 1.8, z: -3.4 }
+        ];
+        myHallOffset = offsets[idx % offsets.length] || { x: (Math.random() - 0.5) * 2, z: -3.0 };
+      }
+      activeWs.send(JSON.stringify({ t: "visit", zone: "Chánh điện" }));
+      activeWs.send(JSON.stringify({
+        t: "state",
+        x: myHallOffset.x,
+        y: 2.4,
+        z: myHallOffset.z,
+        ry: Math.PI,
+        s: 0
+      }));
+      currentZone = "Chánh điện";
+      lastKnownPlace = "Chánh điện";
+    } catch {}
+  }
+
+  // Đảm bảo Tab Clone luôn ở cùng phòng (chua-1, chua-2, ...) với Tab Chủ trì
+  function ensureSameRoomAsMaster(masterRoom) {
+    if (!masterRoom || !activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+    if (currentServerRoom && currentServerRoom !== masterRoom) {
       try {
-        activeWs.send(JSON.stringify({ t: "emote", e: "lay" }));
-        clicked = true;
+        log(`🔄 [Đệ tử #${currentCloneId || "Trợ lực"}] Đang ở ${currentServerRoom}, tự động chuyển sang ${masterRoom} cùng Chủ trì…`, "warn");
+        activeWs.send(JSON.stringify({ t: "room-go", room: masterRoom }));
+        currentServerRoom = masterRoom;
+        setTimeout(syncChanhDienStateToServer, 600);
       } catch {}
     }
-    return clicked;
+  }
+
+  // Thực hiện động tác lạy trực tiếp của Tab này (tránh gửi đúp 2 gói tin cùng lúc)
+  function triggerDirectBow(bypassIntercept = false) {
+    const now = Date.now();
+    lastOwnBowTime = now;
+    if (isCloneTab || swarmRole === "follower" || currentZone === "Chánh điện" || lastKnownPlace === "Chánh điện") {
+      syncChanhDienStateToServer();
+    }
+    const beforeCount = wsSentLayCount;
+    const layBtn = findActionBtn("Lạy");
+    if (layBtn && !layBtn.disabled) {
+      allowMasterDirectLay = bypassIntercept;
+      fireClick(layBtn);
+      allowMasterDirectLay = false;
+    }
+    // Nếu fireClick(layBtn) chưa gửi được gói WS (ví dụ Q.busy trên tab nền hoặc nút ẩn), gửi trực tiếp qua WebSocket
+    if (wsSentLayCount === beforeCount && activeWs && activeWs.readyState === WebSocket.OPEN) {
+      try {
+        allowMasterDirectLay = bypassIntercept;
+        activeWs.send(JSON.stringify({ t: "emote", e: "lay" }));
+        allowMasterDirectLay = false;
+      } catch {}
+    }
+    return true;
   }
 
   function triggerBowAction() {
     const now = Date.now();
     if (now - lastOwnBowTime < 4800) return false;
-    return triggerDirectBow();
+    if (!isCloneTab && swarmRole === "master" && getSwarmFollowerCount() > 0) {
+      executeMasterDongTamBow();
+      return true;
+    }
+    return triggerDirectBow(true);
   }
 
   // Giao tiếp Swarm kép: vừa qua BroadcastChannel vừa qua localStorage StorageEvent (chống thất lạc)
@@ -168,7 +268,7 @@
 
   // --- QUY TRÌNH PHỐI HỢP: ĐỆ TỬ LẠY TRƯỚC -> BÁO VỀ -> CHỦ TRÌ LẠY THEO ---
   let isCoordinatingBow = false;
-  let pendingBowSession = null; // { sessionId, acks: Map<from, name>, startTime }
+  let pendingBowSession = null; // { sessionId, acks: Map<from, name>, serverEmotes: Set<id>, startTime }
 
   async function executeMasterDongTamBow() {
     if (isCoordinatingBow) return false;
@@ -179,6 +279,7 @@
     }
 
     isCoordinatingBow = true;
+    syncChanhDienStateToServer();
     const sessionId = "bow_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const followerCount = getSwarmFollowerCount();
 
@@ -187,6 +288,7 @@
     pendingBowSession = {
       sessionId: sessionId,
       acks: new Map(),
+      serverEmotes: new Set(),
       startTime: Date.now()
     };
 
@@ -195,33 +297,36 @@
       type: "CLONES_BOW_FIRST",
       from: TAB_ID,
       sessionId: sessionId,
+      room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
       time: Date.now()
     });
 
-    // 2. Chờ các tab Clone lạy và gửi tín hiệu báo về (tối đa ~1200ms)
-    const waitLimit = 1200;
+    // 2. Chờ các tab Clone gửi gói lạy lên Server và Server broadcast về (khoảng 450ms - 950ms)
+    const waitLimit = 950;
     const startWait = Date.now();
     while (Date.now() - startWait < waitLimit) {
       const elapsed = Date.now() - startWait;
-      const ackCount = pendingBowSession.acks.size;
+      const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size);
       const expected = followerCount > 0 ? followerCount : 1;
       if (ackCount >= expected && elapsed >= 450) {
         break;
       }
-      await new Promise((r) => setTimeout(r, 60));
+      await new Promise((r) => setTimeout(r, 50));
     }
 
-    const ackCount = pendingBowSession.acks.size;
-    if (ackCount > 0) {
+    const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size);
+    if (pendingBowSession.acks.size > 0) {
       const names = Array.from(pendingBowSession.acks.values()).join(", ");
-      log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${ackCount} đệ tử: [${names}] đã lạy trước!`, "ok");
+      log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${pendingBowSession.acks.size} đệ tử: [${names}] đã lạy trên Server!`, "ok");
+    } else if (ackCount > 0) {
+      log(`🙏 [Chủ trì] Server xác nhận ${ackCount} người vừa lạy trong Chánh điện!`, "ok");
     } else {
       log(`⚠️ [Chủ trì] Chưa nhận phản hồi từ đệ tử · Chủ trì vẫn tiến hành lạy…`, "wait");
     }
 
-    // 3. Chủ trì lạy theo ngay khi các đệ tử đang ở giữa nhịp lạy (~5.6s) trên server
-    log(`👑 [Chủ trì] Chủ trì lạy ngay để hợp nhất Đồng Tâm (≥${ackCount + 1} người cùng lạy)!`, "ok");
-    triggerDirectBow();
+    // 3. Chủ trì lạy ngay khi các đệ tử vừa lạy trên server để Chủ trì là người thứ 5 hoàn tất sóng Đồng Tâm!
+    log(`👑 [Chủ trì] Chủ trì lạy ngay để gặt trọn công đức Đồng Tâm (≥${ackCount + 1} người cùng lạy)!`, "ok");
+    triggerDirectBow(true);
     broadcastSwarmBow();
 
     setTimeout(() => {
@@ -243,6 +348,7 @@
       role: isCloneTab ? "follower" : swarmRole,
       cloneId: currentCloneId || null,
       name: isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì",
+      room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
       time: Date.now()
     });
   }
@@ -332,8 +438,12 @@
         role: data.role,
         cloneId: data.cloneId,
         name: data.name,
+        room: data.room,
         time: now
       });
+      if ((isCloneTab || swarmRole === "follower") && data.role === "master" && data.room) {
+        ensureSameRoomAsMaster(data.room);
+      }
       updateSwarmInfoUI();
       return;
     }
@@ -344,8 +454,13 @@
         if (data.sessionId && data.sessionId === lastHandledBowSessionId) return;
         lastHandledBowSessionId = data.sessionId;
 
+        if (data.room) {
+          ensureSameRoomAsMaster(data.room);
+        }
+        syncChanhDienStateToServer();
+
         log(`👑 [Đệ tử #${currentCloneId || "Trợ lực"}] Nhận lệnh Lạy từ Chủ trì -> Lập tức lạy trước!`, "ok");
-        const bowed = triggerDirectBow();
+        const bowed = triggerDirectBow(true);
         const myName = `Đệ tử #${currentCloneId || "Trợ lực"}`;
 
         // Báo tín hiệu ACK về ngay cho Chủ trì qua cả 2 kênh
@@ -377,23 +492,22 @@
 
     // 4. Xử lý sóng lạy đồng tâm từ các tab khác ngoài Swarm hoặc nhịp lạy chung
     if (data.type === "SWARM_BOW" && autoDongTam) {
+      if (isCloneTab || swarmRole === "follower" || isCoordinatingBow) {
+        return; // Follower chỉ lạy khi có lệnh CLONES_BOW_FIRST từ Chủ trì
+      }
       const peerId = `Tab_${data.from}`;
       peerBowEvents = peerBowEvents.filter((e) => now - e.time <= 4500 && e.id !== peerId);
       peerBowEvents.push({ id: peerId, time: now });
       lastPeerBowTime = now;
 
-      if (isCloneTab || swarmRole === "follower") {
-        return; // Follower chỉ lạy khi có lệnh CLONES_BOW_FIRST từ Chủ trì
-      }
-
       const count = peerBowEvents.length;
-      if (count >= minPeersToBow) {
-        log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người (có Tab Swarm) -> Lập tức lạy cùng!`, "ok");
+      if (count + 1 >= minPeersToBow) {
+        log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count + 1}/${minPeersToBow} người (có Tab Swarm) -> Lập tức lạy cùng!`, "ok");
         if (triggerBowAction()) {
           peerBowEvents = [];
         }
       } else {
-        log(`[Đồng tâm Swarm] Có ${count}/${minPeersToBow} lượt lạy từ Tab khác · Chờ thêm để đủ ≥${minPeersToBow} người…`, "wait");
+        log(`[Đồng tâm Swarm] Có ${count + 1}/${minPeersToBow} người · Chờ thêm để đủ ≥${minPeersToBow} người…`, "wait");
       }
     }
   }
@@ -420,15 +534,13 @@
     // Tạo CID duy nhất cho mỗi tab đệ tử để không bao giờ bị trùng CID hay báo "Chùa đang mở ở nơi khác"
     const uniqueTabCid = generateStandardUUID();
     targetUrl.searchParams.set("cid", uniqueTabCid);
-    const curRoom = targetUrl.searchParams.get("phong");
-    if (!curRoom) {
-      targetUrl.searchParams.set("phong", "chua-1");
-    }
+    const curRoom = currentServerRoom || targetUrl.searchParams.get("phong") || "chua-1";
+    targetUrl.searchParams.set("phong", curRoom);
     const win = window.open(targetUrl.toString(), "_blank");
     if (!win) {
       log(`⚠️ Trình duyệt chặn Popup! Hãy bấm biểu tượng 🚫 "Cửa sổ bật lên bị chặn" ở góc phải thanh URL và chọn "Luôn cho phép", hoặc bấm nút mở lẻ [#${id}] ở dưới nhé!`, "warn");
     } else {
-      log(`👥 Đã mở Tab Trợ lực [Đệ tử #${id}] · CID độc lập: ${uniqueTabCid.slice(0, 8)}…`, "ok");
+      log(`👥 Đã mở Tab Trợ lực [Đệ tử #${id}] vào phòng ${curRoom} · CID: ${uniqueTabCid.slice(0, 8)}…`, "ok");
     }
   }
 
@@ -581,6 +693,7 @@
   }
 
   const serverChores = loadServerChores();
+  let serverMeritDays = 1;
   const enabledTasks = new Set(ALL_TASKS.map((t) => t.id));
   const doneOnce = loadDoneOnce();
 
@@ -593,6 +706,10 @@
   function syncServerMessage(msg) {
     if (!msg || !msg.t) return;
     let changed = false;
+
+    if ((msg.t === "welcome" || msg.t === "room") && msg.room) {
+      currentServerRoom = msg.room;
+    }
 
     // 1. Chores từ welcome hoặc chores
     if (msg.t === "welcome" && msg.chores) {
@@ -623,6 +740,9 @@
       }
     } else if (msg.t === "merit" && msg.me) {
       // 2. Merit & Quests từ server
+      if (typeof msg.me.days === "number" && msg.me.days > 0) {
+        serverMeritDays = msg.me.days;
+      }
       if (typeof msg.me.tk === "boolean" && serverChores.tk !== msg.me.tk) {
         serverChores.tk = msg.me.tk;
         changed = true;
@@ -711,7 +831,7 @@
     // Nếu bảng chưa có cấu trúc nội dung đầy đủ (do máy chủ không gửi { t: "checkin" } khi đã nhận rồi hoặc sau F5)
     if (!weekEl.querySelector(".week-grid") || !weekEl.querySelector(".week-day")) {
       const data = lastCheckinData || {};
-      const days = Number(data.days || serverMeritStats?.days || 1);
+      const days = Number(data.days || serverMeritDays || 1);
       const day = Number(data.day || (((days - 1) % 7) + 1));
       const gifts = data.gifts && Array.isArray(data.gifts) && data.gifts.length === 7
         ? data.gifts
@@ -826,8 +946,44 @@
             lastKnownPlace = payload.zone;
           }
           if (payload.t === "emote" && payload.e === "lay") {
+            wsSentLayCount++;
+            // Nếu người dùng bấm nút "Lạy" trực tiếp của game trên Tab Chủ trì khi đang có đệ tử Clone:
+            // Chặn gói tin lạy đơn độc của Chủ trì, phát lệnh cho toàn bộ đệ tử Clone lạy TRƯỚC (t=0ms),
+            // rồi mới gửi gói tin lạy của Chủ trì lên Server sau 550ms để Chủ trì hưởng trọn công đức Đồng Tâm!
+            if (!isCloneTab && swarmRole === "master" && !allowMasterDirectLay && !isCoordinatingBow && getSwarmFollowerCount() > 0) {
+              isCoordinatingBow = true;
+              lastOwnBowTime = Date.now();
+              const sessionId = `${swarmTabId}_${Date.now()}`;
+              log(`👑 [Chủ trì] Đã chặn lạy lẻ -> Phát lệnh cho ${getSwarmFollowerCount()} đệ tử lạy trước (550ms) để Chủ trì gặt trọn công đức Đồng Tâm!`, "ok");
+              const cmd = {
+                type: "CLONES_BOW_FIRST",
+                sender: swarmTabId,
+                sessionId,
+                room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
+                time: Date.now()
+              };
+              if (swarmChannel) {
+                try { swarmChannel.postMessage(cmd); } catch {}
+              }
+              try { localStorage.setItem("atd_swarm_bow_signal", JSON.stringify(cmd)); } catch {}
+              const savedArgs = [...args];
+              const savedWs = this;
+              setTimeout(() => {
+                try {
+                  syncChanhDienStateToServer();
+                  origSend.apply(savedWs, savedArgs);
+                  lastOwnBowTime = Date.now();
+                  broadcastSwarmBow();
+                  log(`👑 [Chủ trì] Đệ tử đã vào tư thế lạy -> Gửi gói lạy của Chủ trì để hợp nhất Đồng Tâm!`, "ok");
+                } catch {}
+                setTimeout(() => { isCoordinatingBow = false; }, 4800);
+              }, 550);
+              return;
+            }
             lastOwnBowTime = Date.now();
-            broadcastSwarmBow();
+            if (!isCloneTab && swarmRole === "master") {
+              broadcastSwarmBow();
+            }
           }
           if (payload.t === "viec") {
             if (payload.k === "quet") {
@@ -885,22 +1041,36 @@
                   peerBowEvents.push({ id: peerId, time: now });
                   lastPeerBowTime = now;
 
-                  const count = peerBowEvents.length;
-                  if (autoDongTam) {
-                    if (count >= minPeersToBow) {
-                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã gom đủ ${count}/${minPeersToBow} người cùng lạy -> Lập tức lạy cùng để tối đa công đức!`, "ok");
-                      if (triggerBowAction()) {
-                        broadcastSwarmBow();
+                  // Nếu Chủ trì đang gom ACK từ đệ tử, ghi nhận ngay cả từ gói tin emote của Server
+                  if (pendingBowSession && !pendingBowSession.resolved) {
+                    pendingBowSession.serverEmotes.add(peerId);
+                    const totalConfirmed = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size);
+                    if (totalConfirmed >= pendingBowSession.expected && typeof pendingBowSession.resolveNow === "function") {
+                      pendingBowSession.resolved = true;
+                      pendingBowSession.resolveNow(totalConfirmed);
+                    }
+                  }
+
+                  // QUAN TRỌNG: Tab Clone (Follower) tuyệt đối KHÔNG tự ý lạy theo sóng người lạ hoặc lạy SAU Chủ trì!
+                  // Clone phải giữ hồi chiêu để chỉ lạy TRƯỚC khi có lệnh CLONES_BOW_FIRST từ Chủ trì.
+                  if (!isCloneTab && swarmRole !== "follower" && !isCoordinatingBow && autoDongTam) {
+                    const count = peerBowEvents.length;
+                    // count người khác đang lạy + 1 (Chủ trì) >= minPeersToBow
+                    if (count + 1 >= minPeersToBow) {
+                      log(`✦ SÓNG LẠY ĐỒNG TÂM: Đã có ${count} đạo hữu đang lạy (tổng ${count + 1}/${minPeersToBow} người) -> Chủ trì lạy ngay để gặt công đức Đồng Tâm!`, "ok");
+                      if (triggerDirectBow(true)) {
                         peerBowEvents = [];
                       }
                     } else {
-                      log(`[Radar Đồng tâm] Đang có ${count}/${minPeersToBow} người vừa lạy (${peerId}) · Chờ thêm để đủ sóng ≥${minPeersToBow} người…`, "wait");
+                      log(`[Radar Đồng tâm] Đang có ${count} người vừa lạy (${peerId}) · Chờ đủ ${ Math.max(1, minPeersToBow - 1) } người cùng lạy…`, "wait");
                     }
                   }
                 }
                 // Nhận công đức từ chùa
                 if (msg.t === "merit" && msg.gain) {
-                  log(`✦ Nhận công đức từ chùa: +${msg.gain}`, "ok");
+                  const gainAmt = typeof msg.gain === "object" ? (msg.gain.n ?? JSON.stringify(msg.gain)) : msg.gain;
+                  const gainWhy = typeof msg.gain === "object" && msg.gain.why ? ` (${msg.gain.why})` : "";
+                  log(`✦ Nhận công đức từ chùa: +${gainAmt} công đức${gainWhy}`, "ok");
                 }
               }
             } catch {}
@@ -1574,6 +1744,7 @@
   async function runDongTam(myRun) {
     const ok = await teleportToPlace(PLACES.CHANH_DIEN, "Chánh điện", myRun);
     if (!ok) return false;
+    syncChanhDienStateToServer();
 
     // Nếu người dùng CHỈ BẬT DUY NHẤT 1 tác vụ "Lạy đồng tâm":
     // Cho nhân vật đứng túc trực yên tại Chánh điện, liên tục lắng nghe người khác lạy & Swarm, KHÔNG dịch chuyển lại
@@ -1596,9 +1767,9 @@
           const now = Date.now();
 
           // NẾU ĐOÀN SWARM ĐÃ CÓ ĐỦ QUÂN SỐ (1 Master + Followers >= minPeersToBow):
-          // Master tự động dẫn đầu phát động nhịp lạy đồng loạt mỗi 12 giây!
-          // Đệ tử lạy trước -> báo tín hiệu về -> Master lạy sau để tối đa công đức!
-          if (totalSquad >= minPeersToBow && now - lastSquadLeadBowTime >= 12000 && now - lastOwnBowTime >= 5000) {
+          // Master tự động dẫn đầu phát động nhịp lạy đồng loạt mỗi 7.5 giây!
+          // Đệ tử lạy trước -> báo tín hiệu + emote về -> Master lạy sau để tối đa công đức!
+          if (totalSquad >= minPeersToBow && now - lastSquadLeadBowTime >= 7500 && now - lastOwnBowTime >= 5600 && !isCoordinatingBow) {
             log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người -> Chủ trì phát lệnh đệ tử lạy trước để gặt trọn công đức Đồng Tâm!`, "ok");
             lastSquadLeadBowTime = now;
             await executeMasterDongTamBow();
@@ -1609,8 +1780,9 @@
             setStatus(`👑 Chủ trì (${waitSeconds}s) · Đoàn: ${totalSquad} ng · Sóng: ${recent}/${minPeersToBow}`);
           }
         } else {
-          // Tab Follower: Túc trực Chánh điện chờ lệnh từ Chủ trì
+          // Tab Follower: Túc trực Chánh điện chờ lệnh từ Chủ trì & định kỳ báo tọa độ Chánh điện lên Server
           if (waitSeconds % 5 === 0) {
+            syncChanhDienStateToServer();
             setStatus(`🤝 Trợ lực (${waitSeconds}s) · Túc trực Chánh điện chờ lệnh Chủ trì`);
           }
         }
@@ -1621,6 +1793,7 @@
             log("Phát hiện nhân vật chưa ở trong Chánh điện · Tự động di chuyển vào Chánh điện...", "warn");
             await teleportToPlace(PLACES.CHANH_DIEN, "Chánh điện", myRun);
           }
+          syncChanhDienStateToServer();
         }
       }
       return true;
