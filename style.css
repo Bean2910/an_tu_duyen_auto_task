@@ -1051,3 +1051,22 @@
 .sheet.week .week-foot button {
   flex: 1;
 }
+
+/* --- Đố vui Phật pháp (Mở ngoài giờ & Gợi ý đáp án đúng) --- */
+.atd-quiz-inject-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 10px 0 8px;
+}
+.sheet.quiz .quiz-opt.atd-quiz-hint {
+  border-color: rgba(52, 211, 153, 0.78) !important;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.22);
+}
+.sheet.quiz .quiz-opt .atd-hint-tag {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  color: #34d399;
+  margin-left: 6px;
+}

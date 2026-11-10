@@ -566,6 +566,7 @@
     { id: "thoikhoa", label: "Thời khóa", category: "tutap", once: true },
     { id: "tangkinh", label: "Tàng Kinh Các", category: "tutap", once: true },
     { id: "bode", label: "Hạt bồ đề", category: "tutap", once: true },
+    { id: "dovui", label: "Đố vui Phật pháp", category: "tutap", once: true },
     { id: "mo", label: "Gõ mõ", category: "tutap", once: false },
     { id: "beads", label: "Chuỗi hạt", category: "tutap", once: false },
     { id: "claim", label: "Nhận thưởng", category: "tutap", once: false },
@@ -908,6 +909,242 @@
     } catch {}
   }
 
+  // Kho câu hỏi Đố vui Phật pháp (tự động đồng bộ từ gói { t: "quiz-practice" } của máy chủ + bộ câu hỏi chuẩn dự phòng)
+  const FALLBACK_QUIZ_QUESTIONS = [
+    {
+      text: "Đức Phật Thích Ca Mâu Ni đản sinh tại vườn nào?",
+      opts: ["Vườn Lâm Tỳ Ni", "Vườn Lộc Uyển", "Vườn Kỳ Viên", "Vườn Trúc Lâm"],
+      right: 0,
+      why: "Thái tử Tất Đạt Đa đản sinh tại vườn Lâm Tỳ Ni (Lumbini) dưới cội cây Vô Ưu."
+    },
+    {
+      text: "Đức Phật thành đạo dưới cội cây gì?",
+      opts: ["Cây Sala", "Cây Bồ Đề", "Cây Vô Ưu", "Cây Tùng"],
+      right: 1,
+      why: "Ngài thành đạo dưới cội cây Tất Bát La, về sau được gọi là cây Bồ Đề (Bodhi - Giác ngộ)."
+    },
+    {
+      text: "Bài pháp đầu tiên Đức Phật thuyết giảng cho năm anh em Kiều Trần Như tại vườn Lộc Uyển là kinh gì?",
+      opts: ["Kinh Pháp Hoa", "Kinh Kim Cang", "Kinh Chuyển Pháp Luân", "Kinh A Di Đà"],
+      right: 2,
+      why: "Kinh Chuyển Pháp Luân là bài pháp đầu tiên, giảng về Tứ Diệu Đế và Bát Chánh Đạo."
+    },
+    {
+      text: "Trong Tứ Diệu Đế, bốn chân lý lần lượt là gì?",
+      opts: ["Khổ - Tập - Diệt - Đạo", "Sinh - Lão - Bệnh - Tử", "Từ - Bi - Hỷ - Xả", "Giới - Định - Tuệ - Giải"],
+      right: 0,
+      why: "Tứ Diệu Đế gồm: Khổ đế, Tập đế (nguyên nhân khổ), Diệt đế (niết bàn hết khổ) và Đạo đế (con đường diệt khổ)."
+    },
+    {
+      text: "Tứ Vô Lượng Tâm trong Phật giáo bao gồm bốn tâm nào?",
+      opts: ["Chân - Thiện - Mỹ - An", "Từ - Bi - Hỷ - Xả", "Tín - Nguyện - Hạnh - Chứng", "Thân - Thọ - Tâm - Pháp"],
+      right: 1,
+      why: "Tứ Vô Lượng Tâm là bốn tâm rộng lớn không bờ bến: Từ (ban vui), Bi (cứu khổ), Hỷ (vui theo điều lành), Xả (buông xả chấp trước)."
+    },
+    {
+      text: "Con số 108 hạt trong chuỗi tràng hạt Phật giáo tượng trưng cho việc đoạn trừ bao nhiêu phiền não?",
+      opts: ["36 phiền não", "72 phiền não", "108 phiền não", "84 phiền não"],
+      right: 2,
+      why: "108 hạt tượng trưng cho việc đoạn trừ 108 phiền não trần lao của sáu căn khi tiếp xúc sáu trần trong ba thời."
+    },
+    {
+      text: "Bát Chánh Đạo gồm bao nhiêu chi phần tu tập?",
+      opts: ["4 chi phần", "6 chi phần", "8 chi phần", "10 chi phần"],
+      right: 2,
+      why: "Bát Chánh Đạo gồm 8 con đường chân chánh: Chánh kiến, Chánh tư duy, Chánh ngữ, Chánh nghiệp, Chánh mạng, Chánh tinh tấn, Chánh niệm, Chánh định."
+    },
+    {
+      text: "Tam Bảo trong đạo Phật gồm ba ngôi quý báu nào?",
+      opts: ["Giới - Định - Tuệ", "Phật - Pháp - Tăng", "Thân - Khẩu - Ý", "Quá khứ - Hiện tại - Vị lai"],
+      right: 1,
+      why: "Tam Bảo là Phật bảo (Đấng Giác Ngộ), Pháp bảo (Lời dạy chân lý) và Tăng bảo (Đoàn thể thanh tịnh hòa hợp)."
+    },
+    {
+      text: "Tam học (ba môn học vô lậu) làm nền tảng tu tập của người con Phật là gì?",
+      opts: ["Giới - Định - Tuệ", "Tín - Tấn - Niệm", "Bố thí - Ái ngữ - Lợi hành", "Từ - Bi - Hỷ"],
+      right: 0,
+      why: "Do giữ Giới mà sinh Định, do có Định mà phát sinh Tuệ giác giải thoát."
+    },
+    {
+      text: "Vị Bồ Tát nào tiêu biểu cho đại nguyện lắng nghe tiếng kêu khổ của chúng sinh?",
+      opts: ["Văn Thù Sư Lợi Bồ Tát", "Quán Thế Âm Bồ Tát", "Phổ Hiền Bồ Tát", "Địa Tạng Vương Bồ Tát"],
+      right: 1,
+      why: "Quán Thế Âm Bồ Tát luôn quán chiếu, lắng nghe tiếng khổ của thế gian để tầm thanh cứu khổ."
+    },
+    {
+      text: "Lễ Vu Lan Báo Hiếu hằng năm diễn ra vào ngày rằm tháng mấy âm lịch?",
+      opts: ["Rằm tháng Giêng", "Rằm tháng Tư", "Rằm tháng Bảy", "Rằm tháng Mười"],
+      right: 2,
+      why: "Rằm tháng Bảy âm lịch là mùa Vu Lan Báo Hiếu, bắt nguồn từ gương hiếu hạnh của Tôn giả Mục Kiền Liên."
+    },
+    {
+      text: "Đại lễ Phật Đản kỷ niệm ngày Đức Phật Thích Ca ra đời được tổ chức vào tháng mấy âm lịch?",
+      opts: ["Tháng Giêng", "Tháng Tư", "Tháng Bảy", "Tháng Chạp"],
+      right: 1,
+      why: "Rằm tháng Tư âm lịch hằng năm là Đại lễ Phật Đản."
+    }
+  ];
+
+  let cachedQuizQuestions = [...FALLBACK_QUIZ_QUESTIONS];
+  try {
+    const savedQuiz = JSON.parse(localStorage.getItem("atd_quiz_bank") || "null");
+    if (Array.isArray(savedQuiz) && savedQuiz.length > 0) {
+      const seen = new Set(cachedQuizQuestions.map((q) => q.text));
+      for (const q of savedQuiz) {
+        if (q && q.text && Array.isArray(q.opts) && typeof q.right === "number" && !seen.has(q.text)) {
+          seen.add(q.text);
+          cachedQuizQuestions.unshift(q);
+        }
+      }
+    }
+  } catch {}
+
+  function saveQuizQuestionsToCache(qs) {
+    if (!Array.isArray(qs)) return;
+    let added = 0;
+    const seen = new Set(cachedQuizQuestions.map((q) => q.text));
+    for (const q of qs) {
+      if (q && q.text && Array.isArray(q.opts) && typeof q.right === "number") {
+        if (!seen.has(q.text)) {
+          seen.add(q.text);
+          cachedQuizQuestions.unshift({
+            text: q.text,
+            opts: q.opts,
+            right: q.right,
+            why: q.why || "Mỗi câu hỏi là một dịp ôn lại lời Phật dạy."
+          });
+          added++;
+        }
+      }
+    }
+    if (added > 0) {
+      try {
+        localStorage.setItem("atd_quiz_bank", JSON.stringify(cachedQuizQuestions.slice(0, 120)));
+      } catch {}
+    }
+  }
+
+  let lastRealQuizData = null;
+  let fetchingQuizQuestionsForLive = false;
+  let customQuizSession = {
+    active: false,
+    autoSolve: false,
+    questions: [],
+    idx: 0,
+    phase: "off",
+    score: { pts: 0, right: 0 },
+    mine: null,
+    timer: null,
+    startTime: 0,
+    phaseStart: 0,
+    currentPacket: null,
+    onFinish: null
+  };
+
+  function dispatchQuizPacketToClient(packet) {
+    if (!activeWs) return;
+    try {
+      const payload = { ...packet, _atdSimulated: true };
+      customQuizSession.currentPacket = payload;
+      const evt = new MessageEvent("message", {
+        data: JSON.stringify(payload)
+      });
+      if (typeof activeWs.onmessage === "function") {
+        activeWs.onmessage(evt);
+      }
+      activeWs.dispatchEvent(evt);
+    } catch (err) {
+      console.warn("[AutoTask] dispatchQuizPacketToClient error:", err);
+    }
+  }
+
+  function findRightAnswerForQuestion(qObj) {
+    if (!qObj || !qObj.text) return -1;
+    if (typeof qObj.right === "number") return qObj.right;
+    const exact = cachedQuizQuestions.find((item) => item.text === qObj.text);
+    if (exact && typeof exact.right === "number") return exact.right;
+    return -1;
+  }
+
+  // Tô sáng gợi ý đáp án đúng và chèn nút Mở ngoài giờ vào .sheet.quiz
+  function decorateQuizSheetUI() {
+    const sheet = document.querySelector(".sheet.quiz");
+    if (!sheet) return;
+
+    // Hiển thị thanh pill Đố vui trên góc trên nếu đang mở
+    const pill = document.querySelector(".pill.quiz-pill");
+    if (pill && !pill.style.display && pill.textContent.trim() === "") {
+      pill.style.display = "";
+      pill.innerHTML = `<span>🪷 Đố vui Phật pháp</span>`;
+    }
+
+    // 1. Nếu đang ở màn hình chờ / bảng xếp hạng ngoài giờ: Chèn nút "Tham gia Đố vui (Mở ngoài giờ)" & "Tự giải (10/10)"
+    const practiceBtn = sheet.querySelector("[data-practice]");
+    if (practiceBtn && !sheet.querySelector(".atd-quiz-inject-bar") && !sheet.querySelector(".quiz-opts")) {
+      const bar = document.createElement("div");
+      bar.className = "atd-quiz-inject-bar";
+      bar.innerHTML = `
+        <button type="button" class="primary atd-quiz-inline-join">🎯 Tham gia Đố vui ngay (10 câu · Mở ngoài giờ)</button>
+        <button type="button" class="ghost atd-quiz-inline-auto">🤖 Tự động giải đúng 10/10 câu</button>
+      `;
+      practiceBtn.parentNode.insertBefore(bar, practiceBtn);
+      bar.querySelector(".atd-quiz-inline-join")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        triggerDirectDoVui(false);
+      });
+      bar.querySelector(".atd-quiz-inline-auto")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        triggerDirectDoVui(true);
+      });
+    }
+
+    // 2. Nếu đang ở màn hình câu hỏi (Live [data-c] hoặc Ôn bài [data-p]): Gợi ý đáp án đúng
+    const qTextEl = sheet.querySelector(".quiz-q");
+    if (qTextEl) {
+      const qText = qTextEl.textContent.trim();
+      let rightIdx = -1;
+      if (customQuizSession.active && customQuizSession.questions[customQuizSession.idx]) {
+        rightIdx = customQuizSession.questions[customQuizSession.idx].right;
+      } else {
+        rightIdx = findRightAnswerForQuestion({ text: qText });
+      }
+
+      if (rightIdx >= 0) {
+        const optBtn =
+          sheet.querySelector(`.quiz-opt[data-c="${rightIdx}"]:not([disabled])`) ||
+          sheet.querySelector(`.quiz-opt[data-p="${rightIdx}"]:not([disabled])`);
+        if (optBtn && !optBtn.classList.contains("atd-quiz-hint")) {
+          optBtn.classList.add("atd-quiz-hint");
+          const span = optBtn.querySelector("span");
+          if (span && !span.querySelector(".atd-hint-tag")) {
+            const badge = document.createElement("em");
+            badge.className = "atd-hint-tag";
+            badge.textContent = " ✓ Gợi ý đúng";
+            span.appendChild(badge);
+          }
+        }
+      }
+    }
+
+    // 3. Nếu đang ở pha "show" của phiên mở ngoài giờ: Thêm nút "Câu tiếp ➔" để người chơi chủ động qua nhanh nếu muốn
+    if (customQuizSession.active && customQuizSession.phase === "show" && !sheet.querySelector(".atd-quiz-next-now")) {
+      const whyEl = sheet.querySelector(".quiz-why");
+      if (whyEl) {
+        const nextBtn = document.createElement("button");
+        nextBtn.type = "button";
+        nextBtn.className = "primary atd-quiz-next-now";
+        nextBtn.style.marginTop = "8px";
+        nextBtn.textContent = customQuizSession.idx + 1 < customQuizSession.questions.length
+          ? `Câu tiếp theo (${customQuizSession.idx + 2}/${customQuizSession.questions.length}) ➔`
+          : "Xem bảng kết quả ➔";
+        nextBtn.addEventListener("click", () => {
+          advanceCustomQuizQuestion();
+        });
+        whyEl.insertAdjacentElement("afterend", nextBtn);
+      }
+    }
+  }
+
   // Hook WebSocket để đón bắt các gói tin lạy của người chơi khác trong điện
   try {
     const origSend = WebSocket.prototype.send;
@@ -1017,6 +1254,25 @@
             try { updateTagUI(); } catch {}
             try { updateTodayStatsUI(); } catch {}
           }
+          // Đố vui Phật pháp mở ngoài giờ: Chặn gói { t: "quiz" } làm ghi đè trạng thái đang thi
+          if (payload.t === "quiz" && customQuizSession.active) {
+            if (customQuizSession.currentPacket) {
+              setTimeout(() => dispatchQuizPacketToClient(customQuizSession.currentPacket), 20);
+            }
+            return;
+          }
+          // Khi người chơi bấm chọn đáp án [data-c] trong phiên Đố vui mở ngoài giờ
+          if (payload.t === "quiz-ans" && customQuizSession.active) {
+            handleCustomQuizAnswer(Number(payload.i), Number(payload.c));
+            return;
+          }
+          // Nếu người chơi tự bấm nút "Ôn bài" [data-practice] thủ công thì tắt phiên custom để sang chế độ Ôn bài
+          if (payload.t === "quiz-practice" && !fetchingQuizQuestionsForLive) {
+            if (customQuizSession.active) {
+              clearTimeout(customQuizSession.timer);
+              customQuizSession.active = false;
+            }
+          }
         }
       } catch {}
       return origSend.apply(this, args);
@@ -1032,6 +1288,33 @@
               if (typeof event.data === "string") {
                 const msg = JSON.parse(event.data);
                 syncServerMessage(msg);
+
+                // Lưu câu hỏi Đố vui Phật pháp từ gói { t: "quiz-practice", qs }
+                if (msg.t === "quiz-practice" && Array.isArray(msg.qs)) {
+                  saveQuizQuestionsToCache(msg.qs);
+                  // Nếu đang lấy câu hỏi ngầm cho phiên Thi 10 câu (ngoài giờ), không để game chuyển sang mode="practice"
+                  if (fetchingQuizQuestionsForLive) {
+                    return;
+                  }
+                  setTimeout(decorateQuizSheetUI, 60);
+                }
+
+                // Xử lý gói { t: "quiz" }
+                if (msg.t === "quiz") {
+                  if (!msg._atdSimulated) {
+                    lastRealQuizData = msg;
+                    // Nếu đang trong phiên Đố vui mở ngoài giờ mà server trả về phase="off", bỏ qua để không bị đóng màn hình câu hỏi
+                    if (customQuizSession.active && msg.phase !== "ask") {
+                      return;
+                    }
+                    // Nếu đúng 20:00 tối chùa mở Đố vui thật (phase="ask"), nhường quyền cho phiên thật của chùa!
+                    if (msg.phase === "ask" && customQuizSession.active) {
+                      clearTimeout(customQuizSession.timer);
+                      customQuizSession.active = false;
+                    }
+                  }
+                  setTimeout(decorateQuizSheetUI, 60);
+                }
 
                 // Bắt gói tin emote lạy của người khác trong phòng
                 if (msg.t === "emote" && msg.e === "lay") {
@@ -2708,6 +2991,309 @@
     return true;
   }
 
+  // 14b. Đố vui Phật pháp (Mở ngoài giờ 20:00 + Tham gia 10 câu + Tự động giải)
+  function sendCurrentCustomQuizQuestion() {
+    if (!customQuizSession.active) return;
+    clearTimeout(customQuizSession.timer);
+
+    const idx = customQuizSession.idx;
+    const total = customQuizSession.questions.length;
+    if (idx >= total) {
+      // Kết thúc trọn vẹn 10 câu hỏi -> Hiển thị bảng tổng kết Hạng 1
+      customQuizSession.phase = "end";
+      const myName = (() => {
+        try {
+          const u = JSON.parse(localStorage.getItem("anduyen.user") || "null");
+          return u?.name || "Thí chủ";
+        } catch {
+          return "Thí chủ";
+        }
+      })();
+      const pts = customQuizSession.score.pts;
+      const right = customQuizSession.score.right;
+      const endPacket = {
+        t: "quiz",
+        phase: "end",
+        n: total,
+        now: Date.now(),
+        upcoming: Date.now() + 3600000,
+        left: 60000,
+        rank: 1,
+        score: { pts, right },
+        top: [
+          { pid: "me", name: myName, right, pts },
+          { pid: "p1", name: "Tâm An", right: Math.max(6, right - 1), pts: Math.max(520, pts - 95) },
+          { pid: "p2", name: "Minh Tuệ", right: Math.max(5, right - 2), pts: Math.max(410, pts - 180) }
+        ]
+      };
+      dispatchQuizPacketToClient(endPacket);
+      log(`🪷 Hoàn thành Đố vui Phật pháp (${right}/${total} câu đúng · ${pts} điểm)! A Di Đà Phật!`, "ok");
+      setTimeout(() => {
+        customQuizSession.active = false;
+        decorateQuizSheetUI();
+        if (typeof customQuizSession.onFinish === "function") {
+          const cb = customQuizSession.onFinish;
+          customQuizSession.onFinish = null;
+          cb(true);
+        }
+      }, 200);
+      return;
+    }
+
+    const q = customQuizSession.questions[idx];
+    customQuizSession.phase = "ask";
+    customQuizSession.mine = null;
+    customQuizSession.phaseStart = Date.now();
+
+    const askPacket = {
+      t: "quiz",
+      phase: "ask",
+      i: idx,
+      n: total,
+      ask: 15000,
+      show: 4000,
+      start: customQuizSession.startTime,
+      now: Date.now(),
+      left: 15000,
+      upcoming: Date.now() + 3600000,
+      q: {
+        text: q.text,
+        opts: q.opts
+      },
+      score: { ...customQuizSession.score },
+      mine: null
+    };
+
+    dispatchQuizPacketToClient(askPacket);
+    setTimeout(decorateQuizSheetUI, 60);
+
+    // Nếu bật chế độ Tự động giải (Auto-solve): tự chọn đáp án đúng sau 650ms
+    if (customQuizSession.autoSolve) {
+      customQuizSession.timer = setTimeout(() => {
+        if (!customQuizSession.active || customQuizSession.phase !== "ask" || customQuizSession.idx !== idx) return;
+        const optBtn = document.querySelector(`.sheet.quiz.open .quiz-opt[data-c="${q.right}"]:not([disabled])`);
+        if (optBtn) {
+          fireClick(optBtn);
+        } else {
+          handleCustomQuizAnswer(idx, q.right);
+        }
+      }, 650);
+    } else {
+      // Chế độ người chơi tự trả lời (15 giây mỗi câu)
+      customQuizSession.timer = setTimeout(() => {
+        if (!customQuizSession.active || customQuizSession.phase !== "ask" || customQuizSession.idx !== idx) return;
+        showCustomQuizAnswerExplanation(idx, null);
+      }, 15000);
+    }
+  }
+
+  function handleCustomQuizAnswer(i, c) {
+    if (!customQuizSession.active || customQuizSession.phase !== "ask" || i !== customQuizSession.idx) return;
+    if (customQuizSession.mine !== null) return;
+    clearTimeout(customQuizSession.timer);
+
+    customQuizSession.mine = c;
+    const q = customQuizSession.questions[i];
+    const elapsed = Math.max(0, Date.now() - customQuizSession.phaseStart);
+    const leftMs = Math.max(0, 15000 - elapsed);
+
+    if (q && c === q.right) {
+      customQuizSession.score.right++;
+      customQuizSession.score.pts += Math.max(70, Math.round(100 + 50 * (leftMs / 15000)));
+    }
+
+    // Báo cho HP biết người chơi đã chọn đáp án c
+    if (activeWs) {
+      try {
+        const gotEvt = new MessageEvent("message", {
+          data: JSON.stringify({ t: "quiz-got", i, c })
+        });
+        if (typeof activeWs.onmessage === "function") {
+          activeWs.onmessage(gotEvt);
+        }
+        activeWs.dispatchEvent(gotEvt);
+      } catch {}
+    }
+
+    // Sau 400ms hiển thị ngay đáp án đúng & lời giải thích Phật pháp
+    customQuizSession.timer = setTimeout(() => {
+      showCustomQuizAnswerExplanation(i, c);
+    }, 400);
+  }
+
+  function showCustomQuizAnswerExplanation(i, pickedChoice) {
+    if (!customQuizSession.active || i !== customQuizSession.idx) return;
+    clearTimeout(customQuizSession.timer);
+
+    const q = customQuizSession.questions[i];
+    const total = customQuizSession.questions.length;
+    customQuizSession.phase = "show";
+    const showDuration = customQuizSession.autoSolve ? 1050 : 3200;
+
+    const showPacket = {
+      t: "quiz",
+      phase: "show",
+      i,
+      n: total,
+      ask: 15000,
+      show: showDuration,
+      start: customQuizSession.startTime,
+      now: Date.now(),
+      left: showDuration,
+      upcoming: Date.now() + 3600000,
+      q: {
+        text: q.text,
+        opts: q.opts
+      },
+      right: q.right,
+      why: q.why || "Mỗi câu hỏi là một dịp ôn lại lời Phật dạy.",
+      mine: pickedChoice,
+      score: { ...customQuizSession.score }
+    };
+
+    dispatchQuizPacketToClient(showPacket);
+    setTimeout(decorateQuizSheetUI, 60);
+
+    customQuizSession.timer = setTimeout(() => {
+      advanceCustomQuizQuestion();
+    }, showDuration);
+  }
+
+  function advanceCustomQuizQuestion() {
+    if (!customQuizSession.active) return;
+    clearTimeout(customQuizSession.timer);
+    customQuizSession.idx++;
+    sendCurrentCustomQuizQuestion();
+  }
+
+  async function openDoVuiModal() {
+    let sheet = $(".sheet.quiz.open");
+    if (!sheet) {
+      clickMenu("dovui");
+      sheet = await waitFor(() => $(".sheet.quiz.open"), 1500);
+    }
+    if (!sheet) {
+      const pill = $(".pill.quiz-pill");
+      if (pill) {
+        pill.style.display = "";
+        fireClick(pill);
+        sheet = await waitFor(() => $(".sheet.quiz.open"), 1200);
+      }
+    }
+    if (!sheet) {
+      const existing = $(".sheet.quiz");
+      if (existing) {
+        existing.classList.add("open");
+        sheet = existing;
+      }
+    }
+    setTimeout(decorateQuizSheetUI, 100);
+    log("🪷 Đã mở bảng Đố vui Phật pháp · Bạn có thể bấm [🎯 Tham gia (10 câu)] để thi ngay ngoài giờ!", "ok");
+    return sheet;
+  }
+
+  async function triggerDirectDoVui(autoSolve = false, myRun = null) {
+    log(`🪷 Chuẩn bị ${autoSolve ? "Tự động giải" : "Tham gia"} Đố vui Phật pháp (10 câu · Bỏ qua giới hạn 20:00)…`, "step");
+    setStatus(`🪷 Đang mở Đố vui Phật pháp (${autoSolve ? "Tự giải 10/10" : "Tham gia 10 câu"})…`);
+
+    // 1. Lấy câu hỏi mới nhất từ máy chủ chùa thông qua gói { t: "quiz-practice" }
+    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      fetchingQuizQuestionsForLive = true;
+      try {
+        activeWs.send(JSON.stringify({ t: "quiz-practice" }));
+        await sleep(180, myRun);
+        activeWs.send(JSON.stringify({ t: "quiz-practice" }));
+        await sleep(320, myRun);
+      } catch {} finally {
+        fetchingQuizQuestionsForLive = false;
+      }
+    }
+
+    // 2. Mở bảng .sheet.quiz
+    await openDoVuiModal();
+
+    // 3. Nếu đúng 20:00 tối chùa đang mở phiên Đố vui thật (phase === "ask"):
+    if (lastRealQuizData && lastRealQuizData.phase === "ask" && !lastRealQuizData._atdSimulated) {
+      log("🪷 Đang trong giờ Đố vui Phật pháp trực tiếp của chùa (20:00) · Tham gia phiên thật để nhận công đức!", "ok");
+      decorateQuizSheetUI();
+      if (autoSolve) {
+        for (let step = 0; step < 30; step++) {
+          if (myRun !== null && !checkRun(myRun)) break;
+          if (!$(".sheet.quiz.open")) break;
+          decorateQuizSheetUI();
+          const hintBtn = $(".sheet.quiz.open .quiz-opt.atd-quiz-hint:not([disabled])") || $(".sheet.quiz.open .quiz-opt[data-c]:not([disabled])");
+          if (hintBtn) {
+            fireClick(hintBtn);
+          }
+          await sleep(1500, myRun);
+        }
+      }
+      setStatus("Sẵn sàng · bấm Chạy để tự động thực hiện");
+      return true;
+    }
+
+    // 4. Mở ngoài giờ (Bỏ qua giới hạn 20:00 giống Cưỡi Hạc trắng):
+    // Chọn 10 câu hỏi Phật pháp từ kho câu hỏi của chùa
+    const pool = [...cachedQuizQuestions];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const selected10 = pool.slice(0, 10);
+
+    clearTimeout(customQuizSession.timer);
+    let resolveDone = null;
+    const donePromise = new Promise((r) => { resolveDone = r; });
+
+    customQuizSession = {
+      active: true,
+      autoSolve: Boolean(autoSolve),
+      questions: selected10,
+      idx: 0,
+      phase: "wait",
+      score: { pts: 0, right: 0 },
+      mine: null,
+      timer: null,
+      startTime: Date.now(),
+      phaseStart: Date.now(),
+      currentPacket: null,
+      onFinish: resolveDone
+    };
+
+    // Bơm gói phase="wait" trước 40ms rồi chuyển sang phase="ask" để ép HP.mode về "live"
+    dispatchQuizPacketToClient({
+      t: "quiz",
+      phase: "wait",
+      i: 0,
+      n: selected10.length,
+      ask: 15000,
+      show: 4000,
+      start: Date.now(),
+      now: Date.now(),
+      left: 1000,
+      upcoming: Date.now() + 1000
+    });
+
+    await sleep(60, myRun);
+    log(`🪷 Bắt đầu phiên Đố vui Phật pháp 10 câu (${autoSolve ? "Chế độ Tự giải 10/10" : "Đã tô sáng gợi ý đáp án đúng trên mỗi câu"})!`, "ok");
+    sendCurrentCustomQuizQuestion();
+
+    if (autoSolve) {
+      await Promise.race([donePromise, sleep(32000, myRun)]);
+      setStatus("Sẵn sàng · bấm Chạy để tự động thực hiện");
+    }
+    return true;
+  }
+
+  async function runDoVui(myRun) {
+    await closeAllModals(myRun);
+    await triggerDirectDoVui(true, myRun);
+    await sleep(600, myRun);
+    fireClick($(".sheet.quiz.open .sheet-close"));
+    await sleep(300, myRun);
+    return true;
+  }
+
   // 15. Nhận thưởng nhiệm vụ ngày, tuần, nhập môn & lễ ({ t: "claim", q: id }, { t: "claim-le" })
   async function runClaim(myRun) {
     await closeAllModals(myRun);
@@ -2768,6 +3354,7 @@
     thoikhoa: runThoiKhoa,
     tangkinh: runTangKinh,
     bode: runBoDe,
+    dovui: runDoVui,
     incense: runIncenseChanhDien,
     dongtam: runDongTam,
     san_incense: runSanIncense,
@@ -3367,6 +3954,22 @@
                 💡 <i>Mẹo Chrome:</i> Nếu chỉ mở 1 tab, hãy bấm biểu tượng 🚫 <b>"Cửa sổ bật lên bị chặn"</b> ở góc phải thanh địa chỉ (URL) ➔ chọn <b>"Luôn cho phép"</b>, hoặc bấm mở lẻ từng tab [#1, #2, #3, #4] ở trên nhé!
               </div>
             </div>
+            <div class="atd-hac-quick-box atd-quiz-quick-box" id="atd-quiz-quick-box">
+              <div class="atd-hac-title">
+                <span>🪷 <b>Đố vui Phật pháp</b> (Bỏ qua lố giờ):</span>
+              </div>
+              <div class="atd-hac-btns">
+                <button type="button" class="atd-hac-btn" id="atd-btn-quiz-open" title="Mở bảng Đố vui Phật pháp">
+                  🪷 Đố vui
+                </button>
+                <button type="button" class="atd-hac-btn" id="atd-btn-quiz-join" title="Tham gia ngay phiên Đố vui Phật pháp 10 câu (Mở ngoài giờ 20:00, kèm gợi ý đáp án đúng)">
+                  🎯 Tham gia
+                </button>
+                <button type="button" class="atd-hac-btn ghost" id="atd-btn-quiz-auto" title="Mở và tự động giải đúng 10/10 câu Đố vui Phật pháp">
+                  🤖 Tự giải
+                </button>
+              </div>
+            </div>
             <div class="atd-hac-quick-box" id="atd-hac-quick-box">
               <div class="atd-hac-title">
                 <span>🦅 <b>Cưỡi Hạc trắng</b> (Bỏ qua lố giờ):</span>
@@ -3491,6 +4094,10 @@
           tag.style.display = "none";
         }
       });
+      const quizBox = $("#atd-quiz-quick-box", panel);
+      if (quizBox) {
+        quizBox.style.display = (catId === "all" || catId === "tutap") ? "flex" : "none";
+      }
       const hacBox = $("#atd-hac-quick-box", panel);
       if (hacBox) {
         hacBox.style.display = (catId === "all" || catId === "linhvat") ? "flex" : "none";
@@ -3505,6 +4112,18 @@
       }
     }
 
+    const btnQuizOpen = $("#atd-btn-quiz-open", panel);
+    if (btnQuizOpen) {
+      btnQuizOpen.addEventListener("click", () => openDoVuiModal());
+    }
+    const btnQuizJoin = $("#atd-btn-quiz-join", panel);
+    if (btnQuizJoin) {
+      btnQuizJoin.addEventListener("click", () => triggerDirectDoVui(false));
+    }
+    const btnQuizAuto = $("#atd-btn-quiz-auto", panel);
+    if (btnQuizAuto) {
+      btnQuizAuto.addEventListener("click", () => triggerDirectDoVui(true));
+    }
     const btnHacTron = $("#atd-btn-hac-tron", panel);
     if (btnHacTron) {
       btnHacTron.addEventListener("click", () => triggerDirectCuoiHac("tron"));
