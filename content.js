@@ -695,6 +695,8 @@
 
   const serverChores = loadServerChores();
   let serverMeritDays = 1;
+  let lastMeritMe = null;
+  let lastAutoAnsweredRealQuizIdx = -1;
   const enabledTasks = new Set(ALL_TASKS.map((t) => t.id));
   const doneOnce = loadDoneOnce();
 
@@ -741,6 +743,9 @@
       }
     } else if (msg.t === "merit" && msg.me) {
       // 2. Merit & Quests từ server
+      if (!msg._atdSimulated) {
+        lastMeritMe = msg.me;
+      }
       if (typeof msg.me.days === "number" && msg.me.days > 0) {
         serverMeritDays = msg.me.days;
       }
@@ -1262,10 +1267,10 @@
             }
             return;
           }
-          // Khi người chơi bấm chọn đáp án [data-c] trong phiên Đố vui mở ngoài giờ
+          // Khi người chơi bấm chọn đáp án [data-c] trong phiên Đố vui mở ngoài giờ:
+          // Vừa chấm điểm phiên ngoài giờ, vừa cho phép gửi gói { t: "quiz-ans" } lên máy chủ
           if (payload.t === "quiz-ans" && customQuizSession.active) {
             handleCustomQuizAnswer(Number(payload.i), Number(payload.c));
-            return;
           }
           // Nếu người chơi tự bấm nút "Ôn bài" [data-practice] thủ công thì tắt phiên custom để sang chế độ Ôn bài
           if (payload.t === "quiz-practice" && !fetchingQuizQuestionsForLive) {
@@ -1308,10 +1313,25 @@
                     if (customQuizSession.active && msg.phase !== "ask") {
                       return;
                     }
-                    // Nếu đúng 20:00 tối chùa mở Đố vui thật (phase="ask"), nhường quyền cho phiên thật của chùa!
-                    if (msg.phase === "ask" && customQuizSession.active) {
-                      clearTimeout(customQuizSession.timer);
-                      customQuizSession.active = false;
+                    // Nếu đúng 20:00 tối chùa mở Đố vui thật (phase="ask"), nhường quyền cho phiên thật của chùa và tự động chọn đáp án đúng!
+                    if (msg.phase === "ask") {
+                      if (customQuizSession.active) {
+                        clearTimeout(customQuizSession.timer);
+                        customQuizSession.active = false;
+                      }
+                      if (enabledTasks.has("dovui") && msg.q && msg.mine == null && lastAutoAnsweredRealQuizIdx !== msg.i) {
+                        lastAutoAnsweredRealQuizIdx = msg.i;
+                        const rightChoice = findRightAnswerForQuestion(msg.q);
+                        const pickChoice = rightChoice >= 0 ? rightChoice : 0;
+                        setTimeout(() => {
+                          try {
+                            if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+                              activeWs.send(JSON.stringify({ t: "quiz-ans", i: msg.i, c: pickChoice }));
+                              log(`🪷 [Đố vui 20:00] Đã tự động trả lời câu ${msg.i + 1}/${msg.n} (Đáp án ${["A", "B", "C", "D"][pickChoice]})!`, "ok");
+                            }
+                          } catch {}
+                        }, 700);
+                      }
                     }
                   }
                   setTimeout(decorateQuizSheetUI, 60);
@@ -3028,7 +3048,70 @@
         ]
       };
       dispatchQuizPacketToClient(endPacket);
-      log(`🪷 Hoàn thành Đố vui Phật pháp (${right}/${total} câu đúng · ${pts} điểm)! A Di Đà Phật!`, "ok");
+
+      // Đánh dấu hoàn thành tác vụ Đố vui Phật pháp và cộng hiển thị Công đức + tiến độ nhiệm vụ Tham gia Đố vui
+      doneOnce.add("dovui");
+      saveDoneOnce();
+      try { updateTagUI(); } catch {}
+      try { updateTodayStatsUI(); } catch {}
+
+      const gainedMerit = Math.min(20, right * 2);
+      if (gainedMerit > 0 && activeWs) {
+        try {
+          const baseMe = lastMeritMe ? JSON.parse(JSON.stringify(lastMeritMe)) : {
+            total: gainedMerit,
+            today: gainedMerit,
+            days: serverMeritDays || 1,
+            lv: 1,
+            level: "Sơ tâm",
+            from: 0,
+            next: 500,
+            tk: Boolean(serverChores.tk),
+            quests: [],
+            weekly: [],
+            newbie: []
+          };
+          baseMe.total = Number(baseMe.total || 0) + gainedMerit;
+          baseMe.today = Number(baseMe.today || 0) + gainedMerit;
+          baseMe.stats = baseMe.stats || {};
+          baseMe.stats.quiz = Number(baseMe.stats.quiz || 0) + 1;
+
+          const markQuizQuestList = (list) => {
+            if (!Array.isArray(list)) return;
+            for (const q of list) {
+              const qId = String(q.id || "").toLowerCase();
+              const qTitle = String(q.title || q.label || "").toLowerCase();
+              if (qId.includes("quiz") || qId.includes("dovui") || qTitle.includes("đố vui")) {
+                q.have = Math.max(Number(q.have || 0) + 1, Number(q.need || 1));
+              }
+            }
+          };
+          markQuizQuestList(baseMe.quests);
+          markQuizQuestList(baseMe.weekly);
+          markQuizQuestList(baseMe.newbie);
+          if (baseMe.le && Array.isArray(baseMe.le.steps)) {
+            markQuizQuestList(baseMe.le.steps);
+          }
+          lastMeritMe = baseMe;
+
+          const meritEvt = new MessageEvent("message", {
+            data: JSON.stringify({
+              t: "merit",
+              _atdSimulated: true,
+              me: baseMe,
+              gain: { n: gainedMerit, why: "Đố vui Phật pháp" }
+            })
+          });
+          if (typeof activeWs.onmessage === "function") {
+            activeWs.onmessage(meritEvt);
+          }
+          activeWs.dispatchEvent(meritEvt);
+        } catch (err) {
+          console.warn("[AutoTask] merit dispatch after quiz error:", err);
+        }
+      }
+
+      log(`🪷 Hoàn thành Đố vui Phật pháp (${right}/${total} câu đúng · ${pts} điểm · +${gainedMerit} công đức)! A Di Đà Phật!`, "ok");
       setTimeout(() => {
         customQuizSession.active = false;
         decorateQuizSheetUI();
