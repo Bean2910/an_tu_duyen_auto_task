@@ -1254,9 +1254,10 @@
             try { updateTagUI(); } catch {}
             try { updateTodayStatsUI(); } catch {}
           }
-          // Đố vui Phật pháp mở ngoài giờ: Chặn gói { t: "quiz" } làm ghi đè trạng thái đang thi
+          // Đố vui Phật pháp mở ngoài giờ: Chặn gói { t: "quiz" } từ pull() để server không trả về phase="off" và không gây chớp giao diện
           if (payload.t === "quiz" && customQuizSession.active) {
-            if (customQuizSession.currentPacket) {
+            const sheet = document.querySelector(".sheet.quiz.open");
+            if (sheet && !sheet.querySelector(".quiz-opts") && !sheet.querySelector(".quiz-board") && customQuizSession.currentPacket) {
               setTimeout(() => dispatchQuizPacketToClient(customQuizSession.currentPacket), 20);
             }
             return;
@@ -1428,7 +1429,7 @@
   function sleep(ms, myRun) {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
-        if (myRun !== undefined && (!running || myRun !== runId)) {
+        if (myRun != null && (!running || myRun !== runId)) {
           reject(new Error("__ATD_STOPPED__"));
         } else {
           resolve();
@@ -1440,7 +1441,7 @@
   async function waitFor(predicate, timeoutMs = 3000, myRun, intervalMs = 120) {
     const deadline = performance.now() + timeoutMs;
     while (performance.now() < deadline) {
-      if (myRun !== undefined) checkRun(myRun);
+      if (myRun != null) checkRun(myRun);
       const res = predicate();
       if (res) return res;
       await sleep(intervalMs, myRun);
@@ -3192,7 +3193,7 @@
     return sheet;
   }
 
-  async function triggerDirectDoVui(autoSolve = false, myRun = null) {
+  async function triggerDirectDoVui(autoSolve = false, myRun = undefined) {
     log(`🪷 Chuẩn bị ${autoSolve ? "Tự động giải" : "Tham gia"} Đố vui Phật pháp (10 câu · Bỏ qua giới hạn 20:00)…`, "step");
     setStatus(`🪷 Đang mở Đố vui Phật pháp (${autoSolve ? "Tự giải 10/10" : "Tham gia 10 câu"})…`);
 
@@ -3201,16 +3202,20 @@
       fetchingQuizQuestionsForLive = true;
       try {
         activeWs.send(JSON.stringify({ t: "quiz-practice" }));
-        await sleep(180, myRun);
+        await sleep(160, myRun);
         activeWs.send(JSON.stringify({ t: "quiz-practice" }));
-        await sleep(320, myRun);
+        await sleep(260, myRun);
       } catch {} finally {
         fetchingQuizQuestionsForLive = false;
       }
     }
 
-    // 2. Mở bảng .sheet.quiz
-    await openDoVuiModal();
+    // 2. Mở bảng .sheet.quiz và đảm bảo đang ở chế độ Live (nếu đang ở màn hình Ôn bài thì bấm [data-live])
+    const sheet = await openDoVuiModal();
+    const backToLiveBtn = sheet ? sheet.querySelector("[data-live]") : null;
+    if (backToLiveBtn) {
+      fireClick(backToLiveBtn);
+    }
 
     // 3. Nếu đúng 20:00 tối chùa đang mở phiên Đố vui thật (phase === "ask"):
     if (lastRealQuizData && lastRealQuizData.phase === "ask" && !lastRealQuizData._atdSimulated) {
@@ -3218,7 +3223,7 @@
       decorateQuizSheetUI();
       if (autoSolve) {
         for (let step = 0; step < 30; step++) {
-          if (myRun !== null && !checkRun(myRun)) break;
+          if (myRun != null && !checkRun(myRun)) break;
           if (!$(".sheet.quiz.open")) break;
           decorateQuizSheetUI();
           const hintBtn = $(".sheet.quiz.open .quiz-opt.atd-quiz-hint:not([disabled])") || $(".sheet.quiz.open .quiz-opt[data-c]:not([disabled])");
@@ -3250,7 +3255,7 @@
       autoSolve: Boolean(autoSolve),
       questions: selected10,
       idx: 0,
-      phase: "wait",
+      phase: "ask",
       score: { pts: 0, right: 0 },
       mine: null,
       timer: null,
@@ -3260,21 +3265,6 @@
       onFinish: resolveDone
     };
 
-    // Bơm gói phase="wait" trước 40ms rồi chuyển sang phase="ask" để ép HP.mode về "live"
-    dispatchQuizPacketToClient({
-      t: "quiz",
-      phase: "wait",
-      i: 0,
-      n: selected10.length,
-      ask: 15000,
-      show: 4000,
-      start: Date.now(),
-      now: Date.now(),
-      left: 1000,
-      upcoming: Date.now() + 1000
-    });
-
-    await sleep(60, myRun);
     log(`🪷 Bắt đầu phiên Đố vui Phật pháp 10 câu (${autoSolve ? "Chế độ Tự giải 10/10" : "Đã tô sáng gợi ý đáp án đúng trên mỗi câu"})!`, "ok");
     sendCurrentCustomQuizQuestion();
 
