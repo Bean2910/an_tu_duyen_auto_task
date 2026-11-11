@@ -249,12 +249,280 @@
   function triggerBowAction() {
     const now = Date.now();
     if (now - lastOwnBowTime < 4800) return false;
-    if (!isCloneTab && swarmRole === "master" && getSwarmFollowerCount() > 0) {
+    const headlessCnt = typeof headlessDisciples !== "undefined" ? headlessDisciples.getActiveCount() : 0;
+    if (!isCloneTab && swarmRole === "master" && (getSwarmFollowerCount() > 0 || headlessCnt > 0)) {
       executeMasterDongTamBow();
       return true;
     }
     return triggerDirectBow(true);
   }
+
+  // --- QUẢN LÝ ĐỆ TỬ NGẦM (HEADLESS DISCIPLES) CHẠY NGAY TRONG TAB CHÍNH (0 TAB - 0% GPU) ---
+  class HeadlessDiscipleManager {
+    constructor() {
+      this.disciples = [];
+      this.targetCount = 4;
+      this.enabled = false;
+      this.heartbeatTimer = null;
+      this.refreshTimer = null;
+      this.hallOffsets = [
+        { x: -1.2, z: -2.8 },
+        { x: 1.2, z: -2.8 },
+        { x: -2.2, z: -3.5 },
+        { x: 2.2, z: -3.5 },
+        { x: 0, z: -3.8 },
+        { x: -3.0, z: -4.0 },
+        { x: 3.0, z: -4.0 }
+      ];
+    }
+
+    start(count = 4) {
+      this.stop(false);
+      this.enabled = true;
+      this.targetCount = count;
+      const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
+      log(`⚡ Đang kết nối ${count} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
+
+      for (let i = 1; i <= count; i++) {
+        this.spawnDisciple(i, curRoom);
+      }
+
+      this.startTimers();
+      this.updateUI();
+      updateSwarmInfoUI();
+    }
+
+    spawnDisciple(index, room) {
+      if (!this.enabled) return;
+      const cid = generateStandardUUID();
+      const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+      let ws;
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        log(`[Đệ tử ngầm #${index}] Lỗi mở kết nối: ${e.message}`, "warn");
+        return;
+      }
+
+      ws._isHeadlessDisciple = true;
+      const disciple = {
+        index,
+        ws,
+        name: `Đệ tử ngầm #${index}`,
+        cid,
+        room,
+        offset: this.hallOffsets[(index - 1) % this.hallOffsets.length],
+        connected: false,
+        ready: false,
+        myId: null,
+        myPid: null,
+        bowCount: 0
+      };
+
+      this.disciples.push(disciple);
+
+      ws.onopen = () => {
+        if (!this.enabled) {
+          try { ws.close(); } catch {}
+          return;
+        }
+        disciple.connected = true;
+        const helloPacket = {
+          t: "hello",
+          v: 2,
+          cid: disciple.cid,
+          adopt: false,
+          name: disciple.name,
+          kind: "tieu",
+          robe: "nau",
+          skin: "dong",
+          bio: "Đệ tử trợ lực ngầm",
+          beads: "go",
+          cushion: "vang",
+          phapkhi: "mo",
+          room: disciple.room,
+          view: 90
+        };
+        try {
+          ws.send(JSON.stringify(helloPacket));
+        } catch {}
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.t === "welcome") {
+            disciple.myId = msg.id;
+            disciple.myPid = msg.pid;
+            disciple.ready = true;
+            this.sendToHall(disciple);
+            log(`⚡ [Đệ tử ngầm #${index}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
+            this.updateUI();
+            updateSwarmInfoUI();
+          } else if (msg.t === "room") {
+            disciple.room = msg.room;
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        disciple.connected = false;
+        disciple.ready = false;
+        this.updateUI();
+        updateSwarmInfoUI();
+        if (this.enabled) {
+          setTimeout(() => {
+            if (this.enabled) {
+              this.disciples = this.disciples.filter((d) => d !== disciple);
+              this.spawnDisciple(index, room);
+            }
+          }, 3000);
+        }
+      };
+
+      ws.onerror = () => {
+        disciple.connected = false;
+        disciple.ready = false;
+      };
+    }
+
+    sendToHall(disciple) {
+      if (disciple.ws && disciple.ws.readyState === WebSocket.OPEN) {
+        try {
+          disciple.ws.send(JSON.stringify({ t: "visit", zone: "Chánh điện" }));
+          disciple.ws.send(JSON.stringify({
+            t: "state",
+            x: disciple.offset.x,
+            y: 2.4,
+            z: disciple.offset.z,
+            ry: Math.PI,
+            s: 0
+          }));
+        } catch {}
+      }
+    }
+
+    startTimers() {
+      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+      if (this.refreshTimer) clearInterval(this.refreshTimer);
+
+      this.heartbeatTimer = setInterval(() => {
+        if (!this.enabled) return;
+        this.disciples.forEach((d) => {
+          if (d.ws && d.ws.readyState === WebSocket.OPEN) {
+            try { d.ws.send(JSON.stringify({ t: "hb" })); } catch {}
+          }
+        });
+      }, 20000);
+
+      this.refreshTimer = setInterval(() => {
+        if (!this.enabled) return;
+        this.disciples.forEach((d) => {
+          if (d.ready) {
+            this.sendToHall(d);
+          }
+        });
+      }, 15000);
+    }
+
+    syncRoom(newRoom) {
+      if (!newRoom) return;
+      this.disciples.forEach((d) => {
+        d.room = newRoom;
+        if (d.ws && d.ws.readyState === WebSocket.OPEN) {
+          try {
+            d.ws.send(JSON.stringify({ t: "room-go", room: newRoom }));
+            setTimeout(() => this.sendToHall(d), 600);
+          } catch {}
+        }
+      });
+    }
+
+    bowAll() {
+      let count = 0;
+      this.disciples.forEach((d) => {
+        if (d.ready && d.ws && d.ws.readyState === WebSocket.OPEN) {
+          try {
+            this.sendToHall(d);
+            d.ws.send(JSON.stringify({ t: "emote", e: "lay" }));
+            d.bowCount++;
+            count++;
+          } catch {}
+        }
+      });
+      return count;
+    }
+
+    stop(silent = false) {
+      this.enabled = false;
+      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+      if (this.refreshTimer) clearInterval(this.refreshTimer);
+      this.heartbeatTimer = null;
+      this.refreshTimer = null;
+
+      this.disciples.forEach((d) => {
+        if (d.ws) {
+          try { d.ws.close(); } catch {}
+        }
+      });
+      this.disciples = [];
+      this.updateUI();
+      updateSwarmInfoUI();
+      if (!silent) {
+        log("⚡ Đã tắt và ngắt kết nối toàn bộ Đệ tử ngầm.", "info");
+      }
+    }
+
+    getActiveCount() {
+      return this.disciples.filter((d) => d.ready && d.ws && d.ws.readyState === WebSocket.OPEN).length;
+    }
+
+    getTotalCount() {
+      return this.disciples.length;
+    }
+
+    updateUI() {
+      const badge = $("#atd-headless-badge");
+      const btn = $("#atd-btn-toggle-headless");
+      const statusEl = $("#atd-headless-status");
+      const readyCount = this.getActiveCount();
+      const total = this.getTotalCount();
+
+      if (badge) {
+        badge.className = `atd-headless-badge ${this.enabled ? "on" : "off"}`;
+        badge.textContent = this.enabled ? `${readyCount}/${this.targetCount} Sẵn sàng` : "Chưa bật";
+      }
+
+      if (btn) {
+        if (this.enabled) {
+          btn.textContent = `⏹ Tắt ${total} Đệ tử ngầm`;
+          btn.classList.remove("highlight");
+          btn.classList.add("danger");
+        } else {
+          btn.textContent = `⚡ Bật 4 Đệ tử ngầm (0 Tab)`;
+          btn.classList.remove("danger");
+          btn.classList.add("highlight");
+        }
+      }
+
+      if (statusEl) {
+        if (this.enabled) {
+          statusEl.style.display = "block";
+          if (readyCount >= this.targetCount) {
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ngầm</b> đang túc trực trong Chánh điện · 0 tab · 0% GPU`;
+            statusEl.style.color = "#34d399";
+          } else {
+            statusEl.innerHTML = `⏳ Đang kết nối đệ tử ngầm (${readyCount}/${this.targetCount})…`;
+            statusEl.style.color = "#e5bc72";
+          }
+        } else {
+          statusEl.style.display = "none";
+        }
+      }
+    }
+  }
+
+  const headlessDisciples = new HeadlessDiscipleManager();
 
   // Giao tiếp Swarm kép: vừa qua BroadcastChannel vừa qua localStorage StorageEvent (chống thất lạc)
   function sendSwarmMessage(msg) {
@@ -282,8 +550,13 @@
     syncChanhDienStateToServer();
     const sessionId = "bow_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const followerCount = getSwarmFollowerCount();
+    const headlessCount = headlessDisciples ? headlessDisciples.getActiveCount() : 0;
 
-    log(`👑 [Chủ trì] PHÁT ĐỘNG LẠY ĐỒNG TÂM: Lệnh cho ${followerCount > 0 ? followerCount : "các"} đệ tử Trợ lực LẠY TRƯỚC!…`, "step");
+    log(`👑 [Chủ trì] PHÁT ĐỘNG LẠY ĐỒNG TÂM: Lệnh cho các đệ tử trợ lực (${headlessCount > 0 ? `${headlessCount} ngầm, ` : ""}${followerCount > 0 ? `${followerCount} tab` : ""}) LẠY TRƯỚC!…`, "step");
+
+    if (headlessCount > 0) {
+      headlessDisciples.bowAll();
+    }
 
     pendingBowSession = {
       sessionId: sessionId,
@@ -292,39 +565,42 @@
       startTime: Date.now()
     };
 
-    // 1. Master phát tin nhắn CLONES_BOW_FIRST qua cả BroadcastChannel lẫn Storage Bus
-    sendSwarmMessage({
-      type: "CLONES_BOW_FIRST",
-      from: TAB_ID,
-      sessionId: sessionId,
-      room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
-      time: Date.now()
-    });
+    if (followerCount > 0) {
+      // 1. Master phát tin nhắn CLONES_BOW_FIRST qua cả BroadcastChannel lẫn Storage Bus
+      sendSwarmMessage({
+        type: "CLONES_BOW_FIRST",
+        from: TAB_ID,
+        sessionId: sessionId,
+        room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
+        time: Date.now()
+      });
+    }
 
-    // 2. Chờ các tab Clone gửi gói lạy lên Server và Server broadcast về (khoảng 450ms - 950ms)
-    const waitLimit = 950;
+    // 2. Chờ các đệ tử gửi gói lạy lên Server và Server broadcast về (khoảng 450ms - 900ms)
+    const waitLimit = (followerCount > 0) ? 900 : 550;
     const startWait = Date.now();
     while (Date.now() - startWait < waitLimit) {
       const elapsed = Date.now() - startWait;
-      const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size);
-      const expected = followerCount > 0 ? followerCount : 1;
-      if (ackCount >= expected && elapsed >= 450) {
+      const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size, headlessCount);
+      const expected = (followerCount > 0 ? followerCount : 0) + (headlessCount > 0 ? headlessCount : 0);
+      if (expected > 0 && ackCount >= expected && elapsed >= 450) {
         break;
       }
       await new Promise((r) => setTimeout(r, 50));
     }
 
-    const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size);
+    const ackCount = Math.max(pendingBowSession.acks.size, pendingBowSession.serverEmotes.size, headlessCount);
+    if (headlessCount > 0) {
+      log(`⚡ [Chủ trì] ${headlessCount} đệ tử ngầm đã lạy trong Chánh điện!`, "ok");
+    }
     if (pendingBowSession.acks.size > 0) {
       const names = Array.from(pendingBowSession.acks.values()).join(", ");
-      log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${pendingBowSession.acks.size} đệ tử: [${names}] đã lạy trên Server!`, "ok");
-    } else if (ackCount > 0) {
+      log(`🙏 [Chủ trì] Đã nhận tín hiệu từ ${pendingBowSession.acks.size} đệ tử tab: [${names}] đã lạy trên Server!`, "ok");
+    } else if (ackCount > 0 && headlessCount === 0) {
       log(`🙏 [Chủ trì] Server xác nhận ${ackCount} người vừa lạy trong Chánh điện!`, "ok");
-    } else {
-      log(`⚠️ [Chủ trì] Chưa nhận phản hồi từ đệ tử · Chủ trì vẫn tiến hành lạy…`, "wait");
     }
 
-    // 3. Chủ trì lạy ngay khi các đệ tử vừa lạy trên server để Chủ trì là người thứ 5 hoàn tất sóng Đồng Tâm!
+    // 3. Chủ trì lạy ngay khi các đệ tử vừa lạy trên server để Chủ trì là người hoàn tất sóng Đồng Tâm!
     log(`👑 [Chủ trì] Chủ trì lạy ngay để gặt trọn công đức Đồng Tâm (≥${ackCount + 1} người cùng lạy)!`, "ok");
     triggerDirectBow(true);
     broadcastSwarmBow();
@@ -383,18 +659,23 @@
     if (swarmRole === "master") {
       const followers = getSwarmFollowerCount();
       const followerList = getSwarmFollowers();
-      const totalSquad = followers + 1;
+      const headlessCount = typeof headlessDisciples !== "undefined" ? headlessDisciples.getActiveCount() : 0;
+      const totalSquad = followers + headlessCount + 1;
       const isEnough = totalSquad >= minPeersToBow;
-      const names = followerList.map((f) => f.name || `Đệ tử #${f.cloneId || '?'}`).join(", ");
+      const squadNames = [
+        ...followerList.map((f) => f.name || `Đệ tử #${f.cloneId || '?'}`),
+        ...(headlessCount > 0 ? [`${headlessCount} đệ tử ngầm (0 tab)`] : [])
+      ];
+      const names = squadNames.join(", ");
       statusBar.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:3px; width:100%;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span>👥 Đang liên kết: <b style="color:#34d399;">${followers}</b> đệ tử trợ lực (Tổng đoàn: <b>${totalSquad}</b> ng)</span>
+            <span>👥 Đang liên kết: <b style="color:#34d399;">${followers + headlessCount}</b> đệ tử trợ lực (${headlessCount > 0 ? `<span style="color:#38bdf8;">${headlessCount} ngầm</span>, ` : ""}${followers} tab) · Tổng đoàn: <b>${totalSquad}</b> ng</span>
             <span style="color:${isEnough ? '#34d399' : '#e5bc72'}; font-weight:600; font-size:10px;">
               ${isEnough ? '✅ Đủ mốc ≥' + minPeersToBow : '⏳ Chờ thêm để đủ ≥' + minPeersToBow}
             </span>
           </div>
-          ${followers > 0 ? `<div style="font-size:10px; color:#a7f3d0; opacity:0.9;">📋 Danh sách: ${names}</div>` : ''}
+          ${(followers > 0 || headlessCount > 0) ? `<div style="font-size:10px; color:#a7f3d0; opacity:0.9;">📋 Danh sách: ${names}</div>` : ''}
         </div>
       `;
     } else {
@@ -713,6 +994,11 @@
 
     if ((msg.t === "welcome" || msg.t === "room") && msg.room) {
       currentServerRoom = msg.room;
+      try {
+        if (typeof headlessDisciples !== "undefined" && headlessDisciples.enabled) {
+          headlessDisciples.syncRoom(msg.room);
+        }
+      } catch {}
     }
 
     // 1. Chores từ welcome hoặc chores
@@ -1155,6 +1441,9 @@
   try {
     const origSend = WebSocket.prototype.send;
     WebSocket.prototype.send = function(...args) {
+      if (this._isHeadlessDisciple) {
+        return origSend.apply(this, args);
+      }
       activeWs = this;
       if (!this._atdMsgHooked) {
         this._atdMsgHooked = true;
@@ -1190,25 +1479,32 @@
           }
           if (payload.t === "emote" && payload.e === "lay") {
             wsSentLayCount++;
-            // Nếu người dùng bấm nút "Lạy" trực tiếp của game trên Tab Chủ trì khi đang có đệ tử Clone:
-            // Chặn gói tin lạy đơn độc của Chủ trì, phát lệnh cho toàn bộ đệ tử Clone lạy TRƯỚC (t=0ms),
+            // Nếu người dùng bấm nút "Lạy" trực tiếp của game trên Tab Chủ trì khi đang có đệ tử Clone hoặc Đệ tử ngầm:
+            // Chặn gói tin lạy đơn độc của Chủ trì, phát lệnh cho toàn bộ đệ tử lạy TRƯỚC (t=0ms),
             // rồi mới gửi gói tin lạy của Chủ trì lên Server sau 550ms để Chủ trì hưởng trọn công đức Đồng Tâm!
-            if (!isCloneTab && swarmRole === "master" && !allowMasterDirectLay && !isCoordinatingBow && getSwarmFollowerCount() > 0) {
+            const followerCnt = getSwarmFollowerCount();
+            const headlessCnt = typeof headlessDisciples !== "undefined" ? headlessDisciples.getActiveCount() : 0;
+            if (!isCloneTab && swarmRole === "master" && !allowMasterDirectLay && !isCoordinatingBow && (followerCnt > 0 || headlessCnt > 0)) {
               isCoordinatingBow = true;
               lastOwnBowTime = Date.now();
               const sessionId = `${swarmTabId}_${Date.now()}`;
-              log(`👑 [Chủ trì] Đã chặn lạy lẻ -> Phát lệnh cho ${getSwarmFollowerCount()} đệ tử lạy trước (550ms) để Chủ trì gặt trọn công đức Đồng Tâm!`, "ok");
-              const cmd = {
-                type: "CLONES_BOW_FIRST",
-                sender: swarmTabId,
-                sessionId,
-                room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
-                time: Date.now()
-              };
-              if (swarmChannel) {
-                try { swarmChannel.postMessage(cmd); } catch {}
+              log(`👑 [Chủ trì] Đã chặn lạy lẻ -> Phát lệnh cho ${headlessCnt > 0 ? `${headlessCnt} đệ tử ngầm ` : ""}${followerCnt > 0 ? `${followerCnt} đệ tử tab ` : ""}lạy trước (550ms) để Chủ trì gặt trọn công đức Đồng Tâm!`, "ok");
+              if (headlessCnt > 0) {
+                headlessDisciples.bowAll();
               }
-              try { localStorage.setItem("atd_swarm_bow_signal", JSON.stringify(cmd)); } catch {}
+              if (followerCnt > 0) {
+                const cmd = {
+                  type: "CLONES_BOW_FIRST",
+                  sender: swarmTabId,
+                  sessionId,
+                  room: currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1",
+                  time: Date.now()
+                };
+                if (swarmChannel) {
+                  try { swarmChannel.postMessage(cmd); } catch {}
+                }
+                try { localStorage.setItem("atd_swarm_bow_signal", JSON.stringify(cmd)); } catch {}
+              }
               const savedArgs = [...args];
               const savedWs = this;
               setTimeout(() => {
@@ -1289,6 +1585,9 @@
     if (origOnMessageDesc && origOnMessageDesc.set) {
       Object.defineProperty(WebSocket.prototype, "onmessage", {
         set(fn) {
+          if (this._isHeadlessDisciple) {
+            return origOnMessageDesc.set.call(this, fn);
+          }
           activeWs = this;
           const wrapped = function(event) {
             try {
@@ -2068,14 +2367,15 @@
 
         if (swarmRole === "master") {
           const followers = getSwarmFollowerCount();
-          const totalSquad = followers + 1;
+          const headlessCount = typeof headlessDisciples !== "undefined" ? headlessDisciples.getActiveCount() : 0;
+          const totalSquad = followers + headlessCount + 1;
           const now = Date.now();
 
-          // NẾU ĐOÀN SWARM ĐÃ CÓ ĐỦ QUÂN SỐ (1 Master + Followers >= minPeersToBow):
+          // NẾU ĐOÀN SWARM ĐÃ CÓ ĐỦ QUÂN SỐ (1 Master + Followers + Headless >= minPeersToBow):
           // Master tự động dẫn đầu phát động nhịp lạy đồng loạt mỗi 7.5 giây!
           // Đệ tử lạy trước -> báo tín hiệu + emote về -> Master lạy sau để tối đa công đức!
           if (totalSquad >= minPeersToBow && now - lastSquadLeadBowTime >= 7500 && now - lastOwnBowTime >= 5600 && !isCoordinatingBow) {
-            log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người -> Chủ trì phát lệnh đệ tử lạy trước để gặt trọn công đức Đồng Tâm!`, "ok");
+            log(`👑 Tab Chủ trì: Đoàn Swarm đã gom đủ ${totalSquad}/${minPeersToBow} người (${headlessCount > 0 ? `${headlessCount} ngầm, ` : ""}${followers} tab) -> Chủ trì phát lệnh đệ tử lạy trước để gặt trọn công đức Đồng Tâm!`, "ok");
             lastSquadLeadBowTime = now;
             await executeMasterDongTamBow();
           }
@@ -4002,30 +4302,49 @@
             </div>
             <div class="atd-clone-ctrl-box" id="atd-clone-ctrl-box">
               <div class="atd-clone-title">
-                <span>👥 <b>Nhân bản Tab Trợ lực (Swarm 4 Clone)</b>:</span>
+                <span>⚡ <b>Đệ tử ngầm (0 Tab · Cực nhẹ · Không lag)</b>:</span>
+                <span id="atd-headless-badge" class="atd-headless-badge off">Chưa bật</span>
+              </div>
+              <div class="atd-clone-desc">
+                Tự động kết nối 4 đệ tử ngầm vào Chánh điện ngay trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
               </div>
               <div class="atd-clone-btns">
-                <button type="button" class="atd-clone-btn highlight" id="atd-btn-add-4clones" title="Mở nhanh 4 tab Clone tự động vào Chánh điện túc trực lạy trợ lực">
-                  🚀 Mở 4 Clone
+                <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt 4 đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
+                  ⚡ Bật 4 Đệ tử ngầm (0 Tab)
                 </button>
-                <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab Clone mới">
-                  👥 +1 Clone
-                </button>
-                <button type="button" class="atd-clone-btn lead" id="atd-btn-lead-bow" title="Phát lệnh 4 đệ tử lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
-                  🙏 Phát động Lạy (Clones trước)
+                <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
+                  🙏 Phát động Lạy (Đệ tử trước)
                 </button>
               </div>
-              <div class="atd-clone-mini-row">
-                <span>Mở lẻ từng Tab:</span>
-                <div class="atd-clone-mini-btns">
-                  <button type="button" class="atd-clone-mini-btn" data-clone="1" title="Mở Tab Trợ lực [Đệ tử #1]">#1</button>
-                  <button type="button" class="atd-clone-mini-btn" data-clone="2" title="Mở Tab Trợ lực [Đệ tử #2]">#2</button>
-                  <button type="button" class="atd-clone-mini-btn" data-clone="3" title="Mở Tab Trợ lực [Đệ tử #3]">#3</button>
-                  <button type="button" class="atd-clone-mini-btn" data-clone="4" title="Mở Tab Trợ lực [Đệ tử #4]">#4</button>
+              <div id="atd-headless-status" class="atd-headless-status" style="display:none;"></div>
+
+              <div class="atd-clone-subtab-section">
+                <div class="atd-clone-subtab-header">
+                  <span>🌐 Hoặc mở Tab Clone trình duyệt (nếu muốn):</span>
+                  <button type="button" id="atd-btn-toggle-tab-clones" class="atd-link-btn">Hiện mở Tab</button>
+                </div>
+                <div id="atd-tab-clones-subbox" style="display:none; margin-top:6px;">
+                  <div class="atd-clone-btns">
+                    <button type="button" class="atd-clone-btn" id="atd-btn-add-4clones" title="Mở 4 tab trình duyệt riêng">🚀 Mở 4 Tab</button>
+                    <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab">+1 Tab</button>
+                  </div>
+                  <div class="atd-clone-mini-row" style="margin-top:6px;">
+                    <span>Mở lẻ từng Tab:</span>
+                    <div class="atd-clone-mini-btns">
+                      <button type="button" class="atd-clone-mini-btn" data-clone="1" title="Mở Tab Trợ lực [Đệ tử #1]">#1</button>
+                      <button type="button" class="atd-clone-mini-btn" data-clone="2" title="Mở Tab Trợ lực [Đệ tử #2]">#2</button>
+                      <button type="button" class="atd-clone-mini-btn" data-clone="3" title="Mở Tab Trợ lực [Đệ tử #3]">#3</button>
+                      <button type="button" class="atd-clone-mini-btn" data-clone="4" title="Mở Tab Trợ lực [Đệ tử #4]">#4</button>
+                    </div>
+                  </div>
+                  <div class="atd-clone-tip" style="margin-top:6px;">
+                    💡 <i>Mẹo Chrome:</i> Nếu chỉ mở 1 tab, hãy bấm biểu tượng 🚫 <b>"Cửa sổ bật lên bị chặn"</b> ở góc phải thanh URL ➔ chọn <b>"Luôn cho phép"</b>.
+                  </div>
                 </div>
               </div>
-              <div class="atd-clone-tip">
-                💡 <i>Mẹo Chrome:</i> Nếu chỉ mở 1 tab, hãy bấm biểu tượng 🚫 <b>"Cửa sổ bật lên bị chặn"</b> ở góc phải thanh địa chỉ (URL) ➔ chọn <b>"Luôn cho phép"</b>, hoặc bấm mở lẻ từng tab [#1, #2, #3, #4] ở trên nhé!
+
+              <div class="atd-clone-terminal-tip">
+                💻 <b>Chạy qua Terminal:</b> Mở cmd trong thư mục dự án và gõ <code>node disciples.js</code> để chạy đệ tử ngoài terminal!
               </div>
             </div>
             <div class="atd-hac-quick-box atd-quiz-quick-box" id="atd-quiz-quick-box">
@@ -4205,6 +4524,31 @@
     const btnHacDua = $("#atd-btn-hac-dua", panel);
     if (btnHacDua) {
       btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
+    }
+    const btnToggleHeadless = $("#atd-btn-toggle-headless", panel);
+    if (btnToggleHeadless) {
+      btnToggleHeadless.addEventListener("click", () => {
+        if (headlessDisciples.enabled) {
+          headlessDisciples.stop();
+        } else {
+          headlessDisciples.start(4);
+        }
+      });
+    }
+    const btnHeadlessBow = $("#atd-btn-headless-bow", panel);
+    if (btnHeadlessBow) {
+      btnHeadlessBow.addEventListener("click", () => {
+        executeMasterDongTamBow();
+      });
+    }
+    const btnToggleTabClones = $("#atd-btn-toggle-tab-clones", panel);
+    const tabClonesSubbox = $("#atd-tab-clones-subbox", panel);
+    if (btnToggleTabClones && tabClonesSubbox) {
+      btnToggleTabClones.addEventListener("click", () => {
+        const isHidden = tabClonesSubbox.style.display === "none";
+        tabClonesSubbox.style.display = isHidden ? "block" : "none";
+        btnToggleTabClones.textContent = isHidden ? "Ẩn mở Tab" : "Hiện mở Tab";
+      });
     }
     const btnAdd4Clones = $("#atd-btn-add-4clones", panel);
     if (btnAdd4Clones) {
