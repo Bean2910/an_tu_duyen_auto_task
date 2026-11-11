@@ -262,24 +262,26 @@
     constructor() {
       this.disciples = [];
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
-      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(20, savedCount);
+      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
     }
 
     getOffsetForIndex(index) {
-      const row = Math.floor((index - 1) / 5);
-      const col = (index - 1) % 5;
-      const xPositions = [-2.4, -1.2, 0, 1.2, 2.4];
+      const cols = 8;
+      const col = (index - 1) % cols;
+      const row = Math.floor((index - 1) / cols);
+      const xStart = -4.2;
+      const xSpacing = 1.2;
       return {
-        x: xPositions[col] != null ? xPositions[col] : 0,
-        z: -2.6 - (row * 0.8)
+        x: Math.round((xStart + col * xSpacing) * 100) / 100,
+        z: Math.round((-2.6 - (row * 0.85)) * 100) / 100
       };
     }
 
     start(count) {
-      if (typeof count === "number" && !isNaN(count) && count >= 1 && count <= 20) {
+      if (typeof count === "number" && !isNaN(count) && count >= 1 && count <= 100) {
         this.targetCount = count;
       }
       this.stop(false);
@@ -287,8 +289,16 @@
       const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
       log(`⚡ Đang kết nối ${this.targetCount} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
 
+      // Giãn cách mở kết nối (~80ms/đệ tử) để kết nối êm ái, tránh bị server chặn spam
       for (let i = 1; i <= this.targetCount; i++) {
-        this.spawnDisciple(i, curRoom);
+        const delay = (i - 1) * 80;
+        if (delay === 0) {
+          this.spawnDisciple(i, curRoom);
+        } else {
+          setTimeout(() => {
+            if (this.enabled) this.spawnDisciple(i, curRoom);
+          }, delay);
+        }
       }
 
       this.startTimers();
@@ -4322,12 +4332,13 @@
                   <span>👥 Số lượng đệ tử:</span>
                 </div>
                 <div class="atd-headless-input-ctrl">
-                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="20" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 20)" />
+                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
                   <div class="atd-headless-presets">
-                    <button type="button" class="atd-headless-preset-btn" data-count="2" title="Chọn nhanh 2 đệ tử">2</button>
                     <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn nhanh 4 đệ tử (chuẩn Đồng Tâm x5)">4</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="6" title="Chọn nhanh 6 đệ tử">6</button>
                     <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn nhanh 10 đệ tử">10</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn nhanh 20 đệ tử">20</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn nhanh 50 đệ tử">50</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn nhanh 100 đệ tử (Đại tăng đoàn)">100</button>
                   </div>
                 </div>
               </div>
@@ -4554,7 +4565,7 @@
       const handleCountChange = () => {
         let val = parseInt(inputHeadlessCount.value, 10);
         if (isNaN(val) || val < 1) val = 1;
-        if (val > 20) val = 20;
+        if (val > 100) val = 100;
         inputHeadlessCount.value = val;
         localStorage.setItem("atd_headless_count", String(val));
         headlessDisciples.targetCount = val;
@@ -4567,7 +4578,7 @@
       inputHeadlessCount.addEventListener("change", handleCountChange);
       inputHeadlessCount.addEventListener("input", () => {
         let val = parseInt(inputHeadlessCount.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 20) {
+        if (!isNaN(val) && val >= 1 && val <= 100) {
           headlessDisciples.targetCount = val;
           localStorage.setItem("atd_headless_count", String(val));
           if (!headlessDisciples.enabled) {
@@ -4595,7 +4606,7 @@
         } else {
           let count = inputHeadlessCount ? parseInt(inputHeadlessCount.value, 10) : headlessDisciples.targetCount;
           if (isNaN(count) || count < 1) count = 1;
-          if (count > 20) count = 20;
+          if (count > 100) count = 100;
           headlessDisciples.start(count);
         }
       });

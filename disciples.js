@@ -317,10 +317,10 @@ rl.on("line", (line) => {
     bowAllDisciples();
   } else if (cmd.startsWith("count ") || cmd.startsWith("c ")) {
     const newCount = parseInt(cmd.replace(/^(count|c)\s+/, ""), 10);
-    if (!isNaN(newCount) && newCount >= 1 && newCount <= 30) {
+    if (!isNaN(newCount) && newCount >= 1 && newCount <= 100) {
       adjustDiscipleCount(newCount);
     } else {
-      console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 30!\x1b[0m");
+      console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 100!\x1b[0m");
     }
   } else if (cmd === "auto") {
     if (autoBowTimer) {
