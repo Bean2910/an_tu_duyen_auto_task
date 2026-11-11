@@ -696,262 +696,16 @@
   const serverChores = loadServerChores();
   let serverMeritDays = 1;
   let lastMeritMe = null;
-  let lastHelloPayload = null;
-  let lastQuestIdsSignature = "";
-  let lastKnownMeritLv = -1;
-  let isRotatingQuests = false;
-  let pendingHelloOverrides = null;
-  let lastGameOnMessageFn = null;
-  let meritWaiters = [];
-  let lastRotateDiagMsg = "";
   let lastAutoAnsweredRealQuizIdx = -1;
-  let lastRawServerMeritMe = null;
   const enabledTasks = new Set(ALL_TASKS.map((t) => t.id));
   const doneOnce = loadDoneOnce();
+  try { sessionStorage.removeItem("atd_custom_quest_session"); } catch {}
 
-  // Toàn bộ 24 mã nhiệm vụ trên máy chủ chùa (17 nhiệm vụ ngày + 4 nhiệm vụ tuần + 3 nhiệm vụ người mới)
-  const ALL_SERVER_QUEST_IDS = [
-    "lay", "lay27", "ngoi", "ngoi15", "tung", "huong", "thapden",
-    "dong", "chuong", "quet", "tuoi", "phongsinh", "den", "xam",
-    "chu", "vuotve", "quanam",
-    "wLay", "wNgoi", "wDoc", "wAm",
-    "nmHuong", "nmLay", "nmDen"
-  ];
-
-  // Kho 17 Nhiệm vụ Hằng ngày chuẩn của chùa (khớp 100% mã Y3 trong main-C2FINDTG.js để nút "Đi" và Auto Task hoạt động mượt)
-  const DAILY_QUEST_CATALOG = [
-    { id: "huong", title: "Dâng hương tại Chánh điện", need: 1, reward: 15 },
-    { id: "lay", title: "Lạy Phật 3 lạy", need: 3, reward: 15 },
-    { id: "lay27", title: "Thành tâm lạy Phật 9 lạy", need: 9, reward: 20 },
-    { id: "dong", title: "Lạy đồng tâm cùng đạo hữu", need: 3, reward: 20 },
-    { id: "ngoi", title: "Gõ mõ & tĩnh tâm tại Chánh điện", need: 5, reward: 15 },
-    { id: "ngoi15", title: "Lần chuỗi hạt niệm Phật", need: 15, reward: 20 },
-    { id: "tung", title: "Dự một thời khóa tụng kinh", need: 1, reward: 25 },
-    { id: "thapden", title: "Thắp đèn dâng Phật ở Chánh điện", need: 1, reward: 20 },
-    { id: "chuong", title: "Thỉnh ba tiếng chuông tại Gác chuông", need: 1, reward: 15 },
-    { id: "quet", title: "Quét sạch lá rụng ngoài sân chùa", need: 1, reward: 20 },
-    { id: "tuoi", title: "Tưới nước chăm hoa ở Vườn hoa", need: 1, reward: 15 },
-    { id: "phongsinh", title: "Phóng sinh cá xuống hồ sen", need: 1, reward: 20 },
-    { id: "den", title: "Thả một ngọn hoa đăng cầu nguyện", need: 1, reward: 20 },
-    { id: "xam", title: "Rút một quẻ xăm bên Hồ sen", need: 1, reward: 15 },
-    { id: "chu", title: "Xin chữ thư pháp ở lều Thầy đồ", need: 1, reward: 20 },
-    { id: "vuotve", title: "Ghé Vườn Linh Thú vuốt ve thú chùa", need: 1, reward: 15 },
-    { id: "quanam", title: "Dâng hương tại Đài Quan Âm", need: 1, reward: 20 }
-  ];
-
-  // Danh sách 6 lễ hội trong main-C2FINDTG.js (JP)
-  const FESTIVAL_LIST = [
-    { id: "phatdan", label: "🪷 Phật Đản" },
-    { id: "vulan", label: "🌸 Vu Lan" },
-    { id: "tet", label: "🧧 Lễ Tết" },
-    { id: "nguyentieu", label: "🏮 Nguyên Tiêu" },
-    { id: "ram", label: "🌕 Ngày Rằm" },
-    { id: "mung1", label: "🌙 Mùng Một" }
-  ];
-
-  const FESTIVAL_CATALOG = {
-    phatdan: {
-      id: "phatdan",
-      banner: "Đại lễ Phật Đản",
-      reward: 30,
-      keep: "Hoa sen tắm Phật",
-      prize: "Áo lễ Lam Hiền",
-      steps: [
-        { id: "huong", label: "Dâng hương tại Chánh điện", have: 0, need: 1 },
-        { id: "lay", label: "Lạy Phật 3 lạy", have: 0, need: 3 },
-        { id: "den", label: "Thả một ngọn hoa đăng", have: 0, need: 1 }
-      ]
-    },
-    vulan: {
-      id: "vulan",
-      banner: "Đại lễ Vu Lan Báo Hiếu",
-      reward: 30,
-      keep: "Bông hồng cài áo",
-      prize: "Tràng hạt Bồ đề",
-      steps: [
-        { id: "huong", label: "Dâng hương cầu an", have: 0, need: 1 },
-        { id: "lay", label: "Lạy Phật báo hiếu 3 lạy", have: 0, need: 3 },
-        { id: "den", label: "Thả hoa đăng tri ân", have: 0, need: 1 }
-      ]
-    },
-    tet: {
-      id: "tet",
-      banner: "Lễ Chùa Đầu Xuân",
-      reward: 30,
-      keep: "Lộc xuân đầu năm",
-      prize: "Chữ Phúc đầu xuân",
-      steps: [
-        { id: "huong", label: "Dâng hương đầu năm", have: 0, need: 1 },
-        { id: "xam", label: "Rút một quẻ xăm đầu năm", have: 0, need: 1 },
-        { id: "chu", label: "Xin chữ Thầy đồ", have: 0, need: 1 }
-      ]
-    },
-    nguyentieu: {
-      id: "nguyentieu",
-      banner: "Đêm Hội Nguyên Tiêu",
-      reward: 30,
-      keep: "Đèn lồng Nguyên Tiêu",
-      steps: [
-        { id: "huong", label: "Dâng hương Chánh điện", have: 0, need: 1 },
-        { id: "thapden", label: "Thắp đèn dâng Phật", have: 0, need: 1 },
-        { id: "den", label: "Thả hoa đăng đêm rằm", have: 0, need: 1 }
-      ]
-    },
-    ram: {
-      id: "ram",
-      banner: "Lễ Chùa Ngày Rằm",
-      reward: 25,
-      keep: "Trầm hương ngày Rằm",
-      steps: [
-        { id: "huong", label: "Dâng hương lễ Phật", have: 0, need: 1 },
-        { id: "lay", label: "Lạy Phật 3 lạy", have: 0, need: 3 },
-        { id: "phongsinh", label: "Phóng sinh cá hồ sen", have: 0, need: 1 }
-      ]
-    },
-    mung1: {
-      id: "mung1",
-      banner: "Lễ Chùa Mùng Một",
-      reward: 25,
-      keep: "Nụ sen đầu tháng",
-      steps: [
-        { id: "huong", label: "Dâng hương đầu tháng", have: 0, need: 1 },
-        { id: "lay", label: "Lạy Phật 3 lạy", have: 0, need: 3 },
-        { id: "chuong", label: "Thỉnh chuông chùa", have: 0, need: 1 }
-      ]
-    }
-  };
-
-  // Kho Nhiệm vụ Tuần chuẩn của chùa (khớp mã wLay, wNgoi, wDoc, wAm trong main-C2FINDTG.js)
-  const DEFAULT_WEEKLY_QUESTS = [
-    { id: "wLay", title: "Thành tâm lạy Phật trong tuần", need: 21, reward: 50 },
-    { id: "wNgoi", title: "Tĩnh tâm gõ mõ & niệm Phật tuần", need: 35, reward: 50 },
-    { id: "wDoc", title: "Đọc kinh điển tại Tàng Kinh Các", need: 7, reward: 40 },
-    { id: "wAm", title: "Dâng hương hoa tại Am riêng", need: 7, reward: 40 }
-  ];
-
-  function getFreshWeeklyQuests() {
-    const serverWeekly = (Array.isArray(lastMeritMe?.weekly) && lastMeritMe.weekly.length > 0)
-      ? lastMeritMe.weekly
-      : (Array.isArray(lastRawServerMeritMe?.weekly) && lastRawServerMeritMe.weekly.length > 0)
-        ? lastRawServerMeritMe.weekly
-        : (Array.isArray(customQuestSession?.weekly) && customQuestSession.weekly.length > 0)
-          ? customQuestSession.weekly
-          : DEFAULT_WEEKLY_QUESTS;
-
-    return serverWeekly.map((q) => {
-      const def = DEFAULT_WEEKLY_QUESTS.find((x) => x.id === q.id);
-      return {
-        id: q.id,
-        title: q.title || def?.title || q.id,
-        have: 0,
-        need: Number(q.need || def?.need || 7),
-        reward: Number(q.reward || def?.reward || 40),
-        claimed: false
-      };
-    });
-  }
-
-  function loadCustomQuestSession() {
-    try {
-      const raw = JSON.parse(sessionStorage.getItem("atd_custom_quest_session") || "null");
-      if (raw && raw.day === todayDateStr() && (Array.isArray(raw.quests) || Array.isArray(raw.weekly))) {
-        delete raw.lastClaimedTitles;
-        return raw;
-      }
-    } catch {}
-    return {
-      day: todayDateStr(),
-      active: false,
-      mode: "reset",
-      quests: [],
-      weekly: [],
-      le: null,
-      bonusMerit: 0,
-      tkDone: false,
-      rotateCursor: 0
-    };
-  }
-
-  let customQuestSession = loadCustomQuestSession();
-
-  function saveCustomQuestSession() {
-    try {
-      customQuestSession.day = todayDateStr();
-      const copy = { ...customQuestSession };
-      delete copy.lastClaimedTitles;
-      sessionStorage.setItem("atd_custom_quest_session", JSON.stringify(copy));
-    } catch {}
-  }
-
-  function applyCustomQuestSessionToMerit(rawMe) {
-    if (!rawMe) return rawMe;
-    if (!customQuestSession || !customQuestSession.active) {
-      return rawMe;
-    }
-    const me = JSON.parse(JSON.stringify(rawMe));
-    const bonus = Number(customQuestSession.bonusMerit || 0);
-    if (bonus > 0) {
-      me.total = Number(me.total || 0) + bonus;
-      me.today = Number(me.today || 0) + bonus;
-    }
-    me.tk = Boolean(customQuestSession.tkDone);
-    if (Array.isArray(customQuestSession.quests) && customQuestSession.quests.length > 0) {
-      me.quests = customQuestSession.quests.map((q) => ({ ...q }));
-    }
-    if (customQuestSession.le) {
-      me.le = JSON.parse(JSON.stringify(customQuestSession.le));
-    }
-    if (Array.isArray(customQuestSession.weekly) && customQuestSession.weekly.length > 0) {
-      me.weekly = customQuestSession.weekly.map((q) => ({ ...q }));
-    }
-    return me;
-  }
-
-  // Ánh xạ mã nhiệm vụ của máy chủ (Y3) sang mã tác vụ của Auto Task
-  const QUEST_TO_TASK_MAP = {
-    quet: "quet",
-    leaf: "quet",
-    phongsinh: "ca",
-    ca: "ca",
-    fish: "ca",
-    thapden: "lamp",
-    lamp: "lamp",
-    tk: "thoikhoa",
-    khoe: "thoikhoa",
-    thoikhoa: "thoikhoa",
-    tangkinh: "tangkinh",
-    wDoc: "tangkinh",
-    chuong: "bell",
-    bell: "bell",
-    tuoi: "garden",
-    garden: "garden",
-    den: "hoadang",
-    nmDen: "hoadang",
-    xam: "xinxam",
-    chu: "thaydo",
-    vuotve: "linhthu",
-    quanam: "qa_incense",
-    wAm: "am_incense",
-    tung: "thoikhoa",
-    ngoi: "mo",
-    ngoi15: "beads",
-    wNgoi: "mo",
-    huong: "incense",
-    nmHuong: "incense",
-    lay: "incense",
-    lay27: "incense",
-    wLay: "incense",
-    nmLay: "incense",
-    dong: "dongtam"
-  };
-
-  // Đồng bộ ban đầu nếu serverChores đã lưu (và chưa bật phiên reset nhiệm vụ)
-  if (!customQuestSession.active) {
-    if (serverChores.quet) doneOnce.add("quet");
-    if (serverChores.ca) doneOnce.add("ca");
-    if (serverChores.den) doneOnce.add("lamp");
-    if (serverChores.tk) doneOnce.add("thoikhoa");
-  }
+  // Đồng bộ ban đầu nếu serverChores đã lưu
+  if (serverChores.quet) doneOnce.add("quet");
+  if (serverChores.ca) doneOnce.add("ca");
+  if (serverChores.den) doneOnce.add("lamp");
+  if (serverChores.tk) doneOnce.add("thoikhoa");
 
   function syncServerMessage(msg) {
     if (!msg || !msg.t) return;
@@ -961,13 +715,8 @@
       currentServerRoom = msg.room;
     }
 
-    // Luôn tự động gửi { t: "merit" } ngay sau khi nhận { t: "welcome" } để đồng bộ Bảng Nhiệm Vụ mới
-    if (msg.t === "welcome") {
-      setTimeout(queryServerMerit, 60);
-    }
-
-    // 1. Chores từ welcome hoặc chores (nếu đang trong phiên Reset/Xoay NV thì giữ trạng thái mở khóa, không để server khóa lại)
-    if (msg.t === "welcome" && msg.chores && !customQuestSession.active) {
+    // 1. Chores từ welcome hoặc chores
+    if (msg.t === "welcome" && msg.chores) {
       if (typeof msg.chores.quet === "boolean" && serverChores.quet !== msg.chores.quet) {
         serverChores.quet = msg.chores.quet;
         changed = true;
@@ -980,7 +729,7 @@
         serverChores.den = msg.chores.den;
         changed = true;
       }
-    } else if (msg.t === "chores" && msg.c && (!customQuestSession.active || msg._atdSimulated)) {
+    } else if (msg.t === "chores" && msg.c) {
       if (typeof msg.c.quet === "boolean" && serverChores.quet !== msg.c.quet) {
         serverChores.quet = msg.c.quet;
         changed = true;
@@ -996,40 +745,8 @@
     } else if (msg.t === "merit" && msg.me) {
       // 2. Merit & Quests từ server
       if (!msg._atdSimulated) {
-        lastRawServerMeritMe = JSON.parse(JSON.stringify(msg.me));
-        if (typeof msg.me.lv === "number") {
-          if (lastKnownMeritLv >= 0 && msg.me.lv > lastKnownMeritLv) {
-            log(`🎉 CHÚC MỪNG LÊN CẤP TU MỚI: [${msg.me.level}]! Máy chủ vừa làm mới danh sách Nhiệm vụ Hằng ngày cho cấp mới!`, "ok");
-            // Khi nhân vật thực sự lên cấp trên máy chủ, ưu tiên nhận bộ nhiệm vụ mới từ máy chủ
-            customQuestSession.active = false;
-            saveCustomQuestSession();
-          }
-          lastKnownMeritLv = msg.me.lv;
-        }
-        if (customQuestSession.active) {
-          // Nếu máy chủ cũng vừa cộng công đức cho nhiệm vụ vừa trả ở phiên custom, khấu trừ phần trùng để tổng công đức chính xác tuyệt đối
-          if (msg.gain && customQuestSession.lastClaimedAt && Date.now() - customQuestSession.lastClaimedAt < 3500) {
-            const gainAmt = Number(typeof msg.gain === "object" ? msg.gain.n : msg.gain) || 0;
-            if (gainAmt > 0 && customQuestSession.lastClaimedTitles && customQuestSession.lastClaimedTitles.has(msg.gain.why || "")) {
-              customQuestSession.bonusMerit = Math.max(0, Number(customQuestSession.bonusMerit || 0) - gainAmt);
-              customQuestSession.lastClaimedTitles.delete(msg.gain.why || "");
-              saveCustomQuestSession();
-              delete msg.gain;
-            }
-          }
-          msg.me = applyCustomQuestSessionToMerit(msg.me);
-        }
-        lastMeritMe = msg.me;
-        if (meritWaiters.length > 0) {
-          const waiters = meritWaiters.splice(0, meritWaiters.length);
-          for (const resolveFn of waiters) {
-            try { resolveFn(msg.me); } catch {}
-          }
-        }
-      } else {
         lastMeritMe = msg.me;
       }
-
       if (typeof msg.me.days === "number" && msg.me.days > 0) {
         serverMeritDays = msg.me.days;
       }
@@ -1038,116 +755,26 @@
         changed = true;
       }
       if (Array.isArray(msg.me.quests)) {
-        const newSig = msg.me.quests.map((q) => q.id).join(",");
-        if (lastQuestIdsSignature && newSig && newSig !== lastQuestIdsSignature) {
-          const newTitles = msg.me.quests.map((q) => q.title || q.id).join(" · ");
-          log(`🔄 [Bảng Nhiệm Vụ] Danh sách nhiệm vụ hiện tại: [${newTitles}]`, "ok");
-        }
-        if (newSig) lastQuestIdsSignature = newSig;
-
         for (const q of msg.me.quests) {
-          const isClaimed = Boolean(q.claimed);
-          const isReadyToClaim = Boolean(!q.claimed && q.have >= q.need && (q.reward == null || q.reward > 0));
-          const isUnfinished = Boolean(!q.claimed && q.have < q.need);
-          const mappedTask = QUEST_TO_TASK_MAP[q.id];
-
-          // Nếu Auto Task đang chạy và nhiệm vụ đã đủ chỉ số -> Tự động nhận thưởng
-          if (isReadyToClaim && running && enabledTasks.has("claim") && activeWs && activeWs.readyState === WebSocket.OPEN) {
-            if (customQuestSession.active) {
-              setTimeout(() => handleCustomQuestClaim(q.id), 80);
-            } else if (!msg._atdSimulated) {
-              try {
-                activeWs.send(JSON.stringify({ t: "claim", q: q.id }));
-                log(`🎁 Tự động nhận thưởng nhiệm vụ đủ điều kiện: ${q.title || q.id} (+${q.reward || ""} công đức)`, "ok");
-              } catch {}
-            }
-          }
-
-          // Nếu nhiệm vụ trên bảng CHƯA LÀM XONG:
-          // Tự động gỡ khỏi doneOnce & đặt lại serverChores để Auto Task chạy lại tác vụ đó!
-          if (isUnfinished && mappedTask) {
-            if (doneOnce.has(mappedTask)) {
-              doneOnce.delete(mappedTask);
-              changed = true;
-            }
-            if (mappedTask === "quet" && serverChores.quet) { serverChores.quet = false; changed = true; }
-            if (mappedTask === "ca" && serverChores.ca) { serverChores.ca = false; changed = true; }
-            if (mappedTask === "lamp" && serverChores.den) { serverChores.den = false; changed = true; }
-            if (mappedTask === "thoikhoa" && serverChores.tk) { serverChores.tk = false; changed = true; }
-          }
-
-          if (!isClaimed) continue;
+          const isDone = Boolean(q.claimed || (q.have >= q.need));
+          if (!isDone) continue;
           if (q.id === "quet" || q.id === "leaf") {
             if (!serverChores.quet) { serverChores.quet = true; changed = true; }
-          } else if (q.id === "phongsinh" || q.id === "ca" || q.id === "fish") {
+          } else if (q.id === "ca" || q.id === "fish") {
             if (!serverChores.ca) { serverChores.ca = true; changed = true; }
-          } else if (q.id === "thapden" || q.id === "lamp") {
+          } else if (q.id === "den" || q.id === "lamp") {
             if (!serverChores.den) { serverChores.den = true; changed = true; }
-          } else if (q.id === "tk" || q.id === "khoe" || q.id === "thoikhoa" || q.id === "tung") {
+          } else if (q.id === "tk" || q.id === "khoe" || q.id === "thoikhoa") {
             if (!serverChores.tk) { serverChores.tk = true; changed = true; }
-          } else if (q.id === "tangkinh" || q.id === "wDoc") {
+          } else if (q.id === "tangkinh") {
             doneOnce.add("tangkinh");
-            changed = true;
-          } else if (q.id === "chuong" || q.id === "bell") {
+          } else if (q.id === "bell") {
             doneOnce.add("bell");
-            changed = true;
-          } else if (q.id === "tuoi" || q.id === "garden") {
+          } else if (q.id === "garden") {
             doneOnce.add("garden");
-            changed = true;
-          } else if (q.id === "den") {
-            doneOnce.add("hoadang");
-            changed = true;
-          } else if (q.id === "xam") {
-            doneOnce.add("xinxam");
-            changed = true;
-          } else if (q.id === "chu") {
-            doneOnce.add("thaydo");
-            changed = true;
-          } else if (q.id === "vuotve") {
-            doneOnce.add("linhthu");
-            changed = true;
-          } else if (q.id === "quanam") {
-            doneOnce.add("qa_incense");
-            changed = true;
           }
         }
       }
-
-      // Tự động nhận thưởng nhiệm vụ Tuần & Người mới nếu đã đủ điều kiện
-      for (const list of [msg.me.weekly, msg.me.newbie]) {
-        if (Array.isArray(list)) {
-          for (const q of list) {
-            if (!q.claimed && q.have >= q.need && (q.reward == null || q.reward > 0) && activeWs && activeWs.readyState === WebSocket.OPEN) {
-              if (customQuestSession.active) {
-                setTimeout(() => handleCustomQuestClaim(q.id), 80);
-              } else if (!msg._atdSimulated) {
-                try {
-                  activeWs.send(JSON.stringify({ t: "claim", q: q.id }));
-                  log(`🎁 Tự động nhận thưởng: ${q.title || q.id} (+${q.reward} công đức)`, "ok");
-                } catch {}
-              }
-            }
-          }
-        }
-      }
-
-      // Tự động nhận thưởng Lễ hội ({ t: "claim-le" }) nếu Auto Task đang chạy và đã hoàn thành các bước lễ
-      if (msg.me.le && !msg.me.le.claimed && Array.isArray(msg.me.le.steps) && msg.me.le.steps.length > 0) {
-        const allStepsDone = msg.me.le.steps.every((s) => s.have >= s.need);
-        if (allStepsDone && running && enabledTasks.has("claim")) {
-          if (customQuestSession.active && customQuestSession.le) {
-            setTimeout(() => handleCustomFestivalClaim(), 80);
-          } else if (!msg._atdSimulated && activeWs && activeWs.readyState === WebSocket.OPEN) {
-            try {
-              activeWs.send(JSON.stringify({ t: "claim-le" }));
-              log(`🏮 Tự động nhận thưởng Lễ hội: ${msg.me.le.banner || msg.me.le.id}!`, "ok");
-            } catch {}
-          }
-        }
-      }
-
-      try { updateQuestLiveStatusUI(); } catch {}
-      setTimeout(decorateMeritSheetUI, 60);
     }
 
     if (serverChores.quet && !doneOnce.has("quet")) { doneOnce.add("quet"); changed = true; }
@@ -1286,857 +913,6 @@
         activeWs.send(JSON.stringify({ t: "merit" }));
       }
     } catch {}
-  }
-
-  function waitForNextMerit(timeoutMs = 3500) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          resolve(lastMeritMe);
-        }
-      }, timeoutMs);
-      meritWaiters.push((me) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(me);
-        }
-      });
-    });
-  }
-
-  // Kết nối lại phiên WebSocket tức thì (0ms backoff, không hiện popup) để máy chủ nhận gói { t: "hello" } mới và trả về bảng { t: "merit" } mới
-  async function instantReconnectAndWaitMerit({ gio = undefined, le = undefined, adopt = undefined, extraHello = null, timeoutMs = 4000 } = {}) {
-    try {
-      const url = new URL(window.location.href);
-      if (gio === null) {
-        url.searchParams.delete("gio");
-      } else if (gio !== undefined) {
-        url.searchParams.set("gio", String(gio));
-      }
-      if (le === null || le === "") {
-        url.searchParams.delete("le");
-      } else if (le !== undefined) {
-        url.searchParams.set("le", String(le));
-      }
-      window.history.replaceState({}, "", url.toString());
-    } catch {}
-
-    pendingHelloOverrides = {
-      gio,
-      le,
-      adopt,
-      ...(extraHello || {})
-    };
-
-    const meritPromise = waitForNextMerit(timeoutMs);
-
-    let reconnectedZeroMs = false;
-    if (typeof lastGameOnMessageFn === "function") {
-      try {
-        if (activeWs) {
-          activeWs.onclose = null;
-          try { activeWs.close(); } catch {}
-        }
-        // Giả lập sự kiện replaced rồi bấm nút "Dùng ở đây" ngay trong cùng 1 xung nhịp JS (0ms, không chớp giao diện)
-        // để gọi thẳng it.resume() -> this.retry = 1000; this.open() ngay lập tức!
-        lastGameOnMessageFn({ data: JSON.stringify({ t: "replaced", _atdSimulated: true }) });
-        const bannedBtn = document.querySelector(".banned button.primary") || document.querySelector(".banned button");
-        if (bannedBtn) {
-          bannedBtn.click();
-          reconnectedZeroMs = true;
-        }
-        document.querySelectorAll(".banned").forEach((el) => el.remove());
-      } catch {}
-    }
-
-    if (!reconnectedZeroMs && activeWs) {
-      try {
-        activeWs.close();
-      } catch {}
-    }
-
-    const me = await meritPromise;
-    pendingHelloOverrides = null;
-    updateQuestLiveStatusUI();
-    setTimeout(decorateMeritSheetUI, 50);
-    return me;
-  }
-
-  // Tạo gói { t: "hello" } chuẩn theo cấu trúc main-C2FINDTG.js kèm ghi đè gio / le / adopt
-  function buildHelloPayload(gioOverride = undefined, leOverride = undefined, adoptOverride = undefined) {
-    let profile = {};
-    try {
-      profile = JSON.parse(localStorage.getItem("anduyen.profile") || "{}") || {};
-    } catch {}
-    const cid = isCloneTab ? cloneTabCid : (localStorage.getItem("anduyen.cid") || generateStandardUUID());
-    const url = new URL(window.location.href);
-    const room = currentServerRoom || url.searchParams.get("phong") || "chua-1";
-
-    const base = lastHelloPayload ? { ...lastHelloPayload } : {
-      t: "hello",
-      v: 2,
-      cid,
-      adopt: false,
-      name: profile.name || "Thí chủ",
-      kind: profile.kind || "tieu",
-      robe: profile.robe || "nau",
-      skin: profile.skin || "dong",
-      bio: profile.bio ?? "",
-      beads: profile.beads || "go",
-      cushion: profile.cushion || "xam",
-      phapkhi: profile.phapkhi,
-      room,
-      view: 90
-    };
-
-    base.t = "hello";
-    base.v = 2;
-    base.cid = cid;
-    base.room = room;
-    base.adopt = adoptOverride !== undefined ? Boolean(adoptOverride) : Boolean(localStorage.getItem("anduyen.adopt") === "1");
-
-    if (gioOverride === null) {
-      delete base.gio;
-    } else if (gioOverride !== undefined && Number.isFinite(Number(gioOverride))) {
-      base.gio = Number(gioOverride);
-    } else {
-      const urlGio = url.searchParams.get("gio");
-      if (urlGio !== null && Number.isFinite(Number(urlGio))) {
-        base.gio = Number(urlGio);
-      } else {
-        delete base.gio;
-      }
-    }
-
-    if (leOverride === null || leOverride === "") {
-      delete base.le;
-    } else if (typeof leOverride === "string" && leOverride) {
-      base.le = leOverride;
-    } else {
-      const urlLe = url.searchParams.get("le");
-      if (urlLe) base.le = urlLe;
-      else delete base.le;
-    }
-
-    return base;
-  }
-
-  // Phát gói { t: "merit" } đã hợp nhất phiên Reset/Xoay NV vào thẳng giao diện game (Vs.update)
-  function dispatchCustomMeritToGame(gain = undefined) {
-    try {
-      const base = lastRawServerMeritMe || lastMeritMe || {
-        total: 0,
-        today: 0,
-        days: serverMeritDays || 1,
-        lv: 0,
-        level: "Sơ tâm",
-        from: 0,
-        next: 100,
-        tk: false,
-        quests: [],
-        weekly: [],
-        newbie: []
-      };
-      const mergedMe = applyCustomQuestSessionToMerit(base);
-      lastMeritMe = mergedMe;
-
-      const pkt = {
-        t: "merit",
-        _atdSimulated: true,
-        me: mergedMe,
-        ...(gain ? { gain } : {})
-      };
-      const evt = new MessageEvent("message", { data: JSON.stringify(pkt) });
-      if (typeof lastGameOnMessageFn === "function") {
-        lastGameOnMessageFn(evt);
-      } else if (activeWs && typeof activeWs.onmessage === "function") {
-        activeWs.onmessage(evt);
-      }
-      setTimeout(decorateMeritSheetUI, 30);
-      setTimeout(updateQuestLiveStatusUI, 35);
-      updateTagUI();
-      updateTodayStatsUI();
-    } catch (err) {
-      console.warn("[AutoTask] dispatchCustomMeritToGame error:", err);
-    }
-  }
-
-  // Mở khóa biến va = { quet: false, den: false, ca: false } bên trong engine game (main-C2FINDTG.js)
-  function unlockGameChoresInEngine() {
-    serverChores.quet = false;
-    serverChores.ca = false;
-    serverChores.den = false;
-    serverChores.tk = false;
-    saveServerChores();
-    try {
-      const choresPkt = {
-        t: "chores",
-        _atdSimulated: true,
-        c: { quet: false, den: false, ca: false }
-      };
-      const evt = new MessageEvent("message", { data: JSON.stringify(choresPkt) });
-      if (typeof lastGameOnMessageFn === "function") {
-        lastGameOnMessageFn(evt);
-      } else if (activeWs && typeof activeWs.onmessage === "function") {
-        activeWs.onmessage(evt);
-      }
-    } catch {}
-  }
-
-  // Ghi nhận tiến độ thực hiện nhiệm vụ trực tiếp khi người chơi hoặc Auto Task thao tác trong chùa
-  function recordQuestActionProgress(actionType, amount = 1) {
-    if (!customQuestSession || !customQuestSession.active) return;
-
-    const actionQuestMap = {
-      incense: ["huong", "nmHuong"],
-      "ban-incense": ["huong", "nmHuong"],
-      "san-incense": ["huong", "nmHuong"],
-      "am-incense": ["huong", "wAm"],
-      "qa-incense": ["quanam", "huong"],
-      lay: ["lay", "lay27", "dong", "wLay", "nmLay"],
-      mo: ["ngoi", "ngoi15", "wNgoi"],
-      beads: ["ngoi", "ngoi15", "wNgoi"],
-      sit: ["ngoi", "ngoi15", "wNgoi"],
-      "tk-done": ["tung"],
-      "tk-read": ["tung", "wDoc"],
-      lamp: ["thapden"],
-      bell: ["chuong"],
-      quet: ["quet"],
-      water: ["tuoi"],
-      plant: ["tuoi"],
-      pick: ["tuoi"],
-      "offer-flowers": ["tuoi"],
-      ca: ["phongsinh"],
-      lantern: ["den", "nmDen"],
-      xam: ["xam"],
-      chu: ["chu"],
-      vuotve: ["vuotve"]
-    };
-
-    const actionLeStepMap = {
-      incense: ["huong"],
-      "ban-incense": ["huong"],
-      "san-incense": ["huong"],
-      "am-incense": ["huong"],
-      "qa-incense": ["huong", "quanam"],
-      lay: ["lay"],
-      mo: ["ngoi"],
-      beads: ["ngoi"],
-      "tk-done": ["tung"],
-      "tk-read": ["tung"],
-      lamp: ["thapden"],
-      bell: ["chuong"],
-      water: ["hoa", "tuoi"],
-      "offer-flowers": ["hoa", "tuoi"],
-      ca: ["phongsinh"],
-      lantern: ["den"],
-      xam: ["xam"],
-      chu: ["chu"]
-    };
-
-    const targetQuestIds = actionQuestMap[actionType] || [actionType];
-    const targetLeStepIds = actionLeStepMap[actionType] || [actionType];
-    let updated = false;
-
-    if (actionType === "tk-done") {
-      customQuestSession.tkDone = true;
-      updated = true;
-    }
-
-    if (Array.isArray(customQuestSession.quests)) {
-      for (const q of customQuestSession.quests) {
-        if (!q.claimed && targetQuestIds.includes(q.id) && q.have < q.need) {
-          q.have = Math.min(q.need, Number(q.have || 0) + Number(amount || 1));
-          updated = true;
-        }
-      }
-    }
-
-    if (Array.isArray(customQuestSession.weekly)) {
-      for (const q of customQuestSession.weekly) {
-        if (!q.claimed && targetQuestIds.includes(q.id) && q.have < q.need) {
-          q.have = Math.min(q.need, Number(q.have || 0) + Number(amount || 1));
-          updated = true;
-        }
-      }
-    }
-
-    if (customQuestSession.le && !customQuestSession.le.claimed && Array.isArray(customQuestSession.le.steps)) {
-      for (const s of customQuestSession.le.steps) {
-        if (targetLeStepIds.includes(s.id) && s.have < s.need) {
-          s.have = Math.min(s.need, Number(s.have || 0) + Number(amount || 1));
-          updated = true;
-        }
-      }
-    }
-
-    if (updated) {
-      saveCustomQuestSession();
-      dispatchCustomMeritToGame();
-    }
-  }
-
-  // Xử lý trả nhiệm vụ & nhận thưởng công đức ({ t: "claim", q }) cho bảng nhiệm vụ đã Reset / Xoay
-  function handleCustomQuestClaim(questId) {
-    if (!customQuestSession || !customQuestSession.active) {
-      return false;
-    }
-    let q = Array.isArray(customQuestSession.quests)
-      ? customQuestSession.quests.find((item) => item.id === questId)
-      : null;
-    let isWeekly = false;
-    if (!q && Array.isArray(customQuestSession.weekly)) {
-      q = customQuestSession.weekly.find((item) => item.id === questId);
-      if (q) isWeekly = true;
-    }
-    if (!q || q.claimed || q.have < q.need) return false;
-
-    q.claimed = true;
-    const reward = Number(q.reward || (isWeekly ? 50 : 15));
-    customQuestSession.bonusMerit = Number(customQuestSession.bonusMerit || 0) + reward;
-    customQuestSession.lastClaimedAt = Date.now();
-    if (!(customQuestSession.lastClaimedTitles instanceof Set)) {
-      customQuestSession.lastClaimedTitles = new Set();
-    }
-    if (q.title) customQuestSession.lastClaimedTitles.add(q.title);
-    saveCustomQuestSession();
-
-    const mappedTask = QUEST_TO_TASK_MAP[q.id];
-    if (mappedTask && ALL_TASKS.find((t) => t.id === mappedTask)?.once) {
-      doneOnce.add(mappedTask);
-      saveDoneOnce();
-    }
-
-    dispatchCustomMeritToGame({ n: reward, why: q.title || q.id });
-    log(`🎁 Đã trả nhiệm vụ ${isWeekly ? "Tuần" : "Ngày"} "${q.title || q.id}" · Nhận +${reward} công đức!`, "ok");
-    return true;
-  }
-
-  // Xử lý nhận thưởng Lễ hội ({ t: "claim-le" }) cho bảng nhiệm vụ đã Reset / Xoay
-  function handleCustomFestivalClaim() {
-    if (!customQuestSession || !customQuestSession.active || !customQuestSession.le) {
-      return false;
-    }
-    const le = customQuestSession.le;
-    if (le.claimed) return false;
-    const allDone = Array.isArray(le.steps) && le.steps.every((s) => s.have >= s.need);
-    if (!allDone) return false;
-
-    le.claimed = true;
-    const reward = Number(le.reward || 30);
-    customQuestSession.bonusMerit = Number(customQuestSession.bonusMerit || 0) + reward;
-    saveCustomQuestSession();
-
-    try {
-      const leDoneEvt = new MessageEvent("message", {
-        data: JSON.stringify({
-          t: "le-done",
-          _atdSimulated: true,
-          keep: le.keep || "Kỷ vật lễ chùa",
-          prize: le.prize
-        })
-      });
-      if (typeof lastGameOnMessageFn === "function") {
-        lastGameOnMessageFn(leDoneEvt);
-      }
-    } catch {}
-
-    dispatchCustomMeritToGame({ n: reward, why: le.banner || "Hoàn thành Lễ hội" });
-    log(`🏮 Đã nhận thưởng Lễ hội "${le.banner}" · +${reward} công đức & kỷ vật "${le.keep}"!`, "ok");
-    return true;
-  }
-
-  // Cập nhật giao diện hiển thị trạng thái Bảng Nhiệm Vụ trực tiếp trên bảng điều khiển Auto Task & trong .sheet.merit
-  function updateQuestLiveStatusUI() {
-    const statusEl = document.getElementById("atd-quest-live-status");
-    const url = new URL(window.location.href);
-    const curGio = url.searchParams.get("gio");
-    const curLe = url.searchParams.get("le") || customQuestSession?.le?.id || null;
-
-    // Tô sáng nút chọn nhanh Giờ & Lễ hội đang kích hoạt
-    document.querySelectorAll(".atd-q-gio-btn, [data-m-gio]").forEach((btn) => {
-      const gVal = btn.dataset.gio ?? btn.dataset.mGio;
-      btn.classList.toggle("on", (gVal === "real" && curGio === null) || (curGio !== null && String(gVal) === String(curGio)));
-    });
-    document.querySelectorAll(".atd-q-le-btn, [data-m-le]").forEach((btn) => {
-      const lVal = btn.dataset.le ?? btn.dataset.mLe;
-      btn.classList.toggle("on", Boolean(curLe) && String(lVal) === String(curLe));
-    });
-
-    if (!lastMeritMe || !Array.isArray(lastMeritMe.quests)) {
-      if (statusEl) {
-        statusEl.innerHTML = `<span>📋 Bảng NV: Đang đồng bộ từ máy chủ…</span>`;
-      }
-      return;
-    }
-
-    const quests = lastMeritMe.quests;
-    const claimedCount = quests.filter((q) => q.claimed).length;
-    const readyCount = quests.filter((q) => !q.claimed && q.have >= q.need).length;
-    const todoList = quests.filter((q) => !q.claimed && q.have < q.need);
-    const leInfo = lastMeritMe.le
-      ? ` · 🏮 Lễ: <b style="color:#fbbf24;">${lastMeritMe.le.banner || lastMeritMe.le.id}</b> (${lastMeritMe.le.claimed ? "Đã nhận" : `<span style="color:#86efac;">Đang mở (+${lastMeritMe.le.reward || 25} CĐ)</span>`})`
-      : "";
-    const todoNames = todoList.map((q) => `${q.title || q.id} (${q.have}/${q.need})`).join(", ");
-
-    const summaryHtml = `
-      <div style="display:flex; flex-direction:column; gap:3px; width:100%;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
-          <span>📋 Hôm nay: <b style="color:#fff;">${quests.length} NV</b> (<span style="color:#34d399;">${claimedCount} đã nhận</span> · <span style="color:#fbbf24;">${todoList.length} chưa xong</span>${readyCount > 0 ? ` · <b style="color:#86efac;">${readyCount} chờ nhận!</b>` : ""})${leInfo}</span>
-          <span style="font-size:9.5px; color:#e5bc72;">${curGio !== null ? `⏰ Giờ=${curGio}h` : "⏰ Giờ thực"}${curLe ? ` · 🏮 le=${curLe}` : ""}</span>
-        </div>
-        ${
-          todoList.length > 0
-            ? `<div style="font-size:9.5px; color:#fde68a; opacity:0.95;">🎯 Cần làm: ${todoNames}</div>`
-            : readyCount > 0
-              ? `<div style="font-size:9.5px; color:#86efac;">🎁 Có ${readyCount} nhiệm vụ đã làm xong chờ bấm [Nhận thưởng]!</div>`
-              : `<div style="font-size:9.5px; color:#86efac;">✅ Đã hoàn thành ${claimedCount}/${quests.length} NV! Bấm <b>[🔄 Cách 1: Reset NV]</b> để làm lại hoặc <b>[⚡ Cách 2: Đổi Bảng NV Mới]</b> để nhận 5 nhiệm vụ mới.</div>`
-        }
-        ${lastRotateDiagMsg ? `<div style="font-size:9.5px; color:#93c5fd; border-top:1px dashed rgba(255,255,255,0.12); padding-top:2px; margin-top:1px;">${lastRotateDiagMsg}</div>` : ""}
-      </div>
-    `;
-
-    if (statusEl) {
-      statusEl.innerHTML = summaryHtml;
-    }
-    const sheetDiagEl = document.getElementById("atd-merit-sheet-diag");
-    if (sheetDiagEl) {
-      sheetDiagEl.innerHTML = summaryHtml;
-    }
-  }
-
-  // Quét & gửi lệnh Nhận thưởng ({ t: "claim", q }) cho toàn bộ 24 mã nhiệm vụ + Lễ hội ({ t: "claim-le" })
-  async function claimAllServerQuests(silent = false) {
-    let sentCount = 0;
-
-    // Nếu đang có bảng nhiệm vụ Reset / Xoay, nhận toàn bộ nhiệm vụ đã đủ chỉ số
-    if (customQuestSession && customQuestSession.active) {
-      if (Array.isArray(customQuestSession.quests)) {
-        for (const q of customQuestSession.quests) {
-          if (!q.claimed && q.have >= q.need) {
-            if (handleCustomQuestClaim(q.id)) sentCount++;
-          }
-        }
-      }
-      if (customQuestSession.le && !customQuestSession.le.claimed) {
-        if (handleCustomFestivalClaim()) sentCount++;
-      }
-    }
-
-    if (!activeWs || activeWs.readyState !== WebSocket.OPEN) {
-      if (!silent && sentCount === 0) log("⚠️ Chưa kết nối WebSocket với máy chủ chùa.", "warn");
-      return sentCount;
-    }
-
-    // 1. Ưu tiên nhận các nhiệm vụ đã báo đủ tiến độ trong lastMeritMe
-    if (lastMeritMe) {
-      for (const list of [lastMeritMe.quests, lastMeritMe.weekly, lastMeritMe.newbie]) {
-        if (Array.isArray(list)) {
-          for (const q of list) {
-            if (!q.claimed && q.have >= q.need) {
-              try {
-                activeWs.send(JSON.stringify({ t: "claim", q: q.id }));
-                sentCount++;
-              } catch {}
-            }
-          }
-        }
-      }
-      if (lastMeritMe.le && !lastMeritMe.le.claimed) {
-        try {
-          activeWs.send(JSON.stringify({ t: "claim-le" }));
-          sentCount++;
-        } catch {}
-      }
-    }
-
-    // 2. Quét toàn bộ 24 mã nhiệm vụ trên máy chủ + claim-le để không sót bất kỳ nhiệm vụ ẩn nào đủ chỉ số
-    for (const qId of ALL_SERVER_QUEST_IDS) {
-      try {
-        activeWs.send(JSON.stringify({ t: "claim", q: qId }));
-        sentCount++;
-      } catch {}
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    try {
-      activeWs.send(JSON.stringify({ t: "claim-le" }));
-    } catch {}
-
-    await new Promise((r) => setTimeout(r, 80));
-    queryServerMerit();
-
-    if (!silent) {
-      log(`🎁 Đã quét nhận thưởng toàn bộ 24 mã nhiệm vụ Ngày/Tuần/Nhập môn & Lễ hội!`, "ok");
-    }
-    return sentCount;
-  }
-
-  // Áp dụng ghi đè Khung giờ (?gio=) hoặc Lễ hội (?le=) và đồng bộ lại phiên { t: "hello" } + { t: "merit" }
-  async function applyQuestEnvOverride({ gio = undefined, le = undefined, adopt = undefined, reconnect = true, openSheet = false } = {}) {
-    try {
-      const url = new URL(window.location.href);
-      if (gio === null) url.searchParams.delete("gio");
-      else if (gio !== undefined) url.searchParams.set("gio", String(gio));
-      if (le === null || le === "") url.searchParams.delete("le");
-      else if (le !== undefined) url.searchParams.set("le", String(le));
-      window.history.replaceState({}, "", url.toString());
-    } catch {}
-
-    // Nếu người dùng bấm chọn một Lễ hội cụ thể, kích hoạt ngay thẻ Lễ hội đó trên Bảng Nhiệm Vụ
-    if (typeof le === "string" && FESTIVAL_CATALOG[le]) {
-      customQuestSession.active = true;
-      if (!Array.isArray(customQuestSession.quests) || customQuestSession.quests.length === 0) {
-        const src = Array.isArray(lastMeritMe?.quests) && lastMeritMe.quests.length > 0
-          ? lastMeritMe.quests
-          : DAILY_QUEST_CATALOG.slice(0, 5);
-        customQuestSession.quests = src.map((q) => ({ ...q }));
-      }
-      customQuestSession.le = JSON.parse(JSON.stringify(FESTIVAL_CATALOG[le]));
-      customQuestSession.le.claimed = false;
-      saveCustomQuestSession();
-      dispatchCustomMeritToGame();
-      lastRotateDiagMsg = `🏮 Đã mở nhiệm vụ lễ hội <b style="color:#fbbf24;">${customQuestSession.le.banner}</b> (+${customQuestSession.le.reward} công đức)!`;
-    } else if (le === null && customQuestSession.active) {
-      customQuestSession.le = null;
-      saveCustomQuestSession();
-      dispatchCustomMeritToGame();
-    }
-
-    if (reconnect) {
-      const nextGioLabel = gio === null ? "thực" : gio !== undefined ? `${gio}h` : (urlSearchParam("gio") || "thực");
-      const nextLeLabel = le === null ? "tắt" : le !== undefined ? le : (urlSearchParam("le") || "không");
-      log(`🔄 Đang đồng bộ phiên (Giờ=${nextGioLabel}, Lễ=${nextLeLabel})…`, "step");
-      await instantReconnectAndWaitMerit({ gio, le, adopt, timeoutMs: 3200 });
-      if (customQuestSession.active) {
-        dispatchCustomMeritToGame();
-      }
-      log(`✅ Đã đồng bộ khung giờ & bảng Nhiệm vụ!`, "ok");
-    }
-
-    updateQuestLiveStatusUI();
-    setTimeout(decorateMeritSheetUI, 60);
-
-    if (openSheet) {
-      const meritSheet = document.querySelector(".sheet.merit.open");
-      if (!meritSheet) {
-        clickMenu("nhiemvu");
-      }
-      setTimeout(decorateMeritSheetUI, 120);
-    }
-  }
-
-  function urlSearchParam(key) {
-    try {
-      return new URL(window.location.href).searchParams.get(key);
-    } catch {
-      return null;
-    }
-  }
-
-  // CÁCH 1: Reset toàn bộ các nhiệm vụ đã hoàn thành trong ngày về 0/need (Chưa nhận) ngay trên Bảng Nhiệm Vụ (.sheet.merit) & mở khóa Auto Task để làm + trả lại
-  async function triggerResetDailyMethod1(autoRunAfter = false) {
-    // 1. Lấy danh sách 5 nhiệm vụ hiện tại trên bảng (hoặc 5 nhiệm vụ gốc từ máy chủ) và đặt lại have=0, claimed=false
-    const currentQuests = (Array.isArray(lastMeritMe?.quests) && lastMeritMe.quests.length > 0)
-      ? lastMeritMe.quests
-      : (Array.isArray(lastRawServerMeritMe?.quests) && lastRawServerMeritMe.quests.length > 0)
-        ? lastRawServerMeritMe.quests
-        : DAILY_QUEST_CATALOG.slice(0, 5);
-
-    customQuestSession.active = true;
-    customQuestSession.mode = "reset";
-    customQuestSession.tkDone = false;
-    customQuestSession.quests = currentQuests.map((q) => {
-      const catItem = DAILY_QUEST_CATALOG.find((x) => x.id === q.id);
-      return {
-        id: q.id,
-        title: q.title || catItem?.title || q.id,
-        have: 0,
-        need: Number(q.need || catItem?.need || 1),
-        reward: Number(q.reward || catItem?.reward || 15),
-        claimed: false
-      };
-    });
-
-    // Nếu đang có thẻ Lễ hội trên bảng thì reset luôn thẻ Lễ hội về 0/need (chưa nhận)
-    const activeLeId = customQuestSession.le?.id || lastMeritMe?.le?.id || urlSearchParam("le");
-    if (activeLeId && FESTIVAL_CATALOG[activeLeId]) {
-      customQuestSession.le = JSON.parse(JSON.stringify(FESTIVAL_CATALOG[activeLeId]));
-      customQuestSession.le.claimed = false;
-    } else if (lastMeritMe?.le) {
-      customQuestSession.le = JSON.parse(JSON.stringify(lastMeritMe.le));
-      customQuestSession.le.claimed = false;
-      if (Array.isArray(customQuestSession.le.steps)) {
-        customQuestSession.le.steps.forEach((s) => { s.have = 0; });
-      }
-    }
-
-    // Đồng thời reset luôn nhiệm vụ Tuần về 0/need để người dùng làm và trả lại trọn gói cả Ngày & Tuần
-    customQuestSession.weekly = getFreshWeeklyQuests();
-
-    saveCustomQuestSession();
-
-    // 2. Mở khóa toàn bộ trạng thái đã làm trong Auto Task & biến va bên trong game engine
-    resetDailyState();
-    unlockGameChoresInEngine();
-
-    for (const q of customQuestSession.quests) {
-      const mapped = QUEST_TO_TASK_MAP[q.id];
-      if (mapped) enabledTasks.add(mapped);
-    }
-    for (const q of customQuestSession.weekly) {
-      const mapped = QUEST_TO_TASK_MAP[q.id];
-      if (mapped) enabledTasks.add(mapped);
-    }
-    for (const t of ALL_TASKS) {
-      if (t.once) enabledTasks.add(t.id);
-    }
-    enabledTasks.add("claim");
-
-    // 3. Cập nhật ngay lập tức Bảng Nhiệm Vụ (.sheet.merit) trên màn hình
-    const resetTitles = customQuestSession.quests.map((q) => q.title).join(" · ");
-    lastRotateDiagMsg = `✅ <b>[Cách 1] Đã reset toàn bộ Nhiệm Vụ Ngày & Tuần về 0/need (Chưa nhận)!</b> Bạn có thể bấm nút <b>[Đi]</b> trên từng nhiệm vụ hoặc bấm <b>[▶ Chạy Auto]</b> để làm và nhận thưởng lại ngay.`;
-    dispatchCustomMeritToGame();
-
-    log(`🔄 [Cách 1] Đã reset toàn bộ ${customQuestSession.quests.length} nhiệm vụ ngày + ${customQuestSession.weekly.length} nhiệm vụ tuần về trạng thái Chưa hoàn thành (0/need)!`, "ok");
-
-    if (autoRunAfter) {
-      const sheet = document.querySelector(".sheet.merit.open");
-      if (sheet) sheet.classList.remove("open");
-      if (running) {
-        stop("Đang khởi động lại chu kỳ làm nhiệm vụ vừa reset…");
-        await new Promise((r) => setTimeout(r, 300));
-      }
-      start();
-    }
-  }
-
-  // Reset toàn bộ nhiệm vụ Tuần về 0/need (Chưa nhận) ngay trên Bảng Nhiệm Vụ (.sheet.merit) & mở khóa Auto Task
-  async function triggerResetWeeklyQuests(autoRunAfter = false) {
-    customQuestSession.active = true;
-    customQuestSession.weekly = getFreshWeeklyQuests();
-    saveCustomQuestSession();
-
-    // Mở khóa các tác vụ tương ứng với nhiệm vụ tuần trong doneOnce
-    for (const q of customQuestSession.weekly) {
-      const mapped = QUEST_TO_TASK_MAP[q.id];
-      if (mapped) {
-        doneOnce.delete(mapped);
-        enabledTasks.add(mapped);
-      }
-    }
-    enabledTasks.add("claim");
-    saveDoneOnce();
-    updateTagUI();
-
-    const weeklyTitles = customQuestSession.weekly.map((q) => q.title).join(" · ");
-    lastRotateDiagMsg = `📅 <b>Đã reset ${customQuestSession.weekly.length} Nhiệm Vụ Tuần về 0/need (Chưa nhận)!</b> Vào tab [Tuần] trên bảng Nhiệm Vụ để xem và làm lại.`;
-    dispatchCustomMeritToGame();
-
-    log(`📅 Đã reset toàn bộ ${customQuestSession.weekly.length} nhiệm vụ Tuần về 0/need (Chưa nhận): [${weeklyTitles}]!`, "ok");
-    setStatus("Đã reset NV Tuần · Bấm Chạy để tự động làm & nhận thưởng");
-
-    if (autoRunAfter) {
-      const sheet = document.querySelector(".sheet.merit.open");
-      if (sheet) sheet.classList.remove("open");
-      if (running) {
-        stop("Khởi động lại Auto với nhiệm vụ tuần mới…");
-        await new Promise((r) => setTimeout(r, 300));
-      }
-      start();
-    }
-  }
-
-  // CÁCH 2: Xoay & Đổi sang bộ 5 Nhiệm Vụ Hằng Ngày MỚI (từ kho 17 nhiệm vụ của chùa) + Mở Lễ hội mới ngay trên Bảng Nhiệm Vụ (.sheet.merit)
-  async function triggerRotateQuestsMethod2(autoRunAfter = false) {
-    if (isRotatingQuests) {
-      log("⏳ Đang xoay bảng nhiệm vụ mới, vui lòng đợi giây lát…", "wait");
-      return;
-    }
-    isRotatingQuests = true;
-    try {
-      // 1. Lấy danh sách ID nhiệm vụ hiện tại để loại trừ, đảm bảo bảng nhiệm vụ đổi sang 5 nhiệm vụ MỚI hoàn toàn
-      const currentIds = new Set(
-        Array.isArray(lastMeritMe?.quests) ? lastMeritMe.quests.map((q) => q.id) : []
-      );
-      const cursor = Number(customQuestSession.rotateCursor || 0);
-
-      // Sắp xếp kho 17 nhiệm vụ: ưu tiên các nhiệm vụ không nằm trong bảng cũ và xoay vòng theo cursor
-      const freshPool = [];
-      const fallbackPool = [];
-      for (let i = 0; i < DAILY_QUEST_CATALOG.length; i++) {
-        const item = DAILY_QUEST_CATALOG[(cursor + i) % DAILY_QUEST_CATALOG.length];
-        if (!currentIds.has(item.id)) {
-          freshPool.push(item);
-        } else {
-          fallbackPool.push(item);
-        }
-      }
-      const picked = [...freshPool, ...fallbackPool].slice(0, 5);
-
-      // 2. Xoay sang Lễ hội tiếp theo trong 6 Lễ hội của chùa
-      const curLeId = customQuestSession.le?.id || urlSearchParam("le") || lastMeritMe?.le?.id || "phatdan";
-      const curLeIdx = FESTIVAL_LIST.findIndex((f) => f.id === curLeId);
-      const nextLeObj = FESTIVAL_LIST[(curLeIdx + 1) % FESTIVAL_LIST.length];
-      const nextLeData = JSON.parse(JSON.stringify(FESTIVAL_CATALOG[nextLeObj.id]));
-      nextLeData.claimed = false;
-
-      // 3. Cập nhật phiên nhiệm vụ mới (5 nhiệm vụ mới have=0, claimed=false + Lễ hội mới)
-      customQuestSession.active = true;
-      customQuestSession.mode = "rotate";
-      customQuestSession.tkDone = false;
-      customQuestSession.rotateCursor = (cursor + 5) % DAILY_QUEST_CATALOG.length;
-      customQuestSession.quests = picked.map((q) => ({
-        id: q.id,
-        title: q.title,
-        have: 0,
-        need: q.need,
-        reward: q.reward,
-        claimed: false
-      }));
-      customQuestSession.le = nextLeData;
-      saveCustomQuestSession();
-
-      // 4. Đặt URL ?gio=19&le=... để mở khóa luôn khung giờ Thắp đèn (19h) & Lễ hội
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set("gio", "19");
-        url.searchParams.set("le", nextLeObj.id);
-        window.history.replaceState({}, "", url.toString());
-      } catch {}
-
-      // 5. Mở khóa toàn bộ trạng thái Auto Task & biến va trong engine game
-      resetDailyState();
-      unlockGameChoresInEngine();
-
-      for (const q of customQuestSession.quests) {
-        const mapped = QUEST_TO_TASK_MAP[q.id];
-        if (mapped) enabledTasks.add(mapped);
-      }
-      for (const t of ALL_TASKS) {
-        if (t.once) enabledTasks.add(t.id);
-      }
-      enabledTasks.add("claim");
-
-      const newQuestTitles = customQuestSession.quests.map((q) => q.title).join(" · ");
-      lastRotateDiagMsg = `🎉 <b>[Cách 2] Đã đổi sang 5 Nhiệm Vụ Ngày mới + ${nextLeData.banner} (+${nextLeData.reward} CĐ)!</b> Tất cả đều ở trạng thái <b>0/need (Chưa nhận)</b> — sẵn sàng làm và trả nhiệm vụ!`;
-
-      // 6. Phát ngay gói { t: "merit" } mới vào Bảng Nhiệm Vụ (.sheet.merit) để đổi danh sách ngay trước mắt
-      dispatchCustomMeritToGame();
-
-      log(`⚡ [Cách 2] Đã đổi Bảng Nhiệm Vụ mới thành công: [${newQuestTitles}] + Lễ hội [${nextLeData.banner}]!`, "ok");
-      setStatus("Đã đổi bảng NV mới · Bấm Chạy để tự động làm & nhận thưởng");
-
-      if (autoRunAfter) {
-        const sheet = document.querySelector(".sheet.merit.open");
-        if (sheet) sheet.classList.remove("open");
-        if (running) {
-          stop("Khởi chạy Auto với bảng nhiệm vụ mới…");
-          await new Promise((r) => setTimeout(r, 300));
-        }
-        start();
-      }
-    } finally {
-      isRotatingQuests = false;
-    }
-  }
-
-  // Bật chế độ Cày Công Đức Lên Cấp Tu hoặc chạy ngay bộ nhiệm vụ mới
-  async function triggerFarmLevelUpForNewQuests() {
-    await triggerRotateQuestsMethod2(true);
-  }
-
-  // Chèn thanh công cụ Reset & Xoay Nhiệm Vụ (Cách 1 & Cách 2) ngay bên trong bảng Nhiệm vụ (.sheet.merit) của game
-  function decorateMeritSheetUI() {
-    const sheet = document.querySelector(".sheet.merit");
-    if (!sheet) return;
-    const tabBody = sheet.querySelector(".tab-body");
-    if (!tabBody) return;
-
-    const curGio = urlSearchParam("gio");
-    const curLe = urlSearchParam("le") || customQuestSession?.le?.id || null;
-
-    let bar = sheet.querySelector(".atd-merit-inject-bar");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.className = "atd-merit-inject-bar";
-      tabBody.prepend(bar);
-    }
-
-    bar.innerHTML = `
-      <div class="atd-merit-inject-head">
-        <span>⚡ <b>Auto Task · Reset & Đổi Nhiệm Vụ Hằng Ngày</b></span>
-        <small>${curGio !== null ? `Giờ: ${curGio}h` : "Giờ thực"}${curLe ? ` · Lễ: ${curLe}` : ""}</small>
-      </div>
-      <div class="atd-merit-inject-btns">
-        <button type="button" class="atd-m-btn c1" data-m-act="c1" title="Cách 1: Reset toàn bộ 5 nhiệm vụ ngày đã hoàn thành trên bảng về 0/need (Chưa nhận) để làm và nhận thưởng lại">
-          🔄 Cách 1: Reset NV Ngày
-        </button>
-        <button type="button" class="atd-m-btn weekly" data-m-act="weekly" title="Reset toàn bộ các nhiệm vụ Tuần đã hoàn thành về 0/need (Chưa nhận) để làm và nhận thưởng lại">
-          📅 Reset NV Tuần
-        </button>
-        <button type="button" class="atd-m-btn c2" data-m-act="c2" title="Cách 2: Đổi sang bộ 5 Nhiệm Vụ Hằng Ngày MỚI + Lễ hội mới (0/need) để tiếp tục làm và trả nhiệm vụ">
-          ⚡ Cách 2: Đổi 5 NV Mới
-        </button>
-        <button type="button" class="atd-m-btn run" data-m-act="c2-run" title="Đổi bảng nhiệm vụ mới và lập tức chạy Auto đi làm + nhận thưởng">
-          🚀 Đổi NV & Chạy Auto
-        </button>
-      </div>
-      <div class="atd-merit-inject-chips">
-        <span>Đổi Giờ:</span>
-        ${[
-          { g: "6", l: "6h Sáng" },
-          { g: "12", l: "12h Trưa" },
-          { g: "17", l: "17h Hạc" },
-          { g: "19", l: "19h Đèn" },
-          { g: "22", l: "22h Đêm" },
-          { g: "real", l: "Giờ thực" }
-        ].map((item) => `<button type="button" class="atd-m-chip ${(item.g === "real" && curGio === null) || String(curGio) === item.g ? "on" : ""}" data-m-gio="${item.g}">${item.l}</button>`).join("")}
-      </div>
-      <div class="atd-merit-inject-chips">
-        <span>Mở Lễ:</span>
-        ${FESTIVAL_LIST.map((f) => `<button type="button" class="atd-m-chip ${curLe === f.id ? "on" : ""}" data-m-le="${f.id}">${f.label}</button>`).join("")}
-      </div>
-      <div id="atd-merit-sheet-diag" style="font-size:10px; line-height:1.38; color:#e5e7eb; background:rgba(0,0,0,0.28); border-radius:6px; padding:5px 7px; margin-top:2px;"></div>
-    `;
-
-    bar.querySelector('[data-m-act="c1"]')?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      triggerResetDailyMethod1(false);
-    });
-    bar.querySelector('[data-m-act="weekly"]')?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      triggerResetWeeklyQuests(false);
-    });
-    bar.querySelector('[data-m-act="c2"]')?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      triggerRotateQuestsMethod2(false);
-    });
-    bar.querySelector('[data-m-act="c2-run"]')?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      triggerRotateQuestsMethod2(true);
-    });
-
-    bar.querySelectorAll("[data-m-gio]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const g = btn.dataset.mGio;
-        applyQuestEnvOverride({ gio: g === "real" ? null : g, reconnect: true, openSheet: true });
-      });
-    });
-
-    bar.querySelectorAll("[data-m-le]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const l = btn.dataset.mLe;
-        const nextLe = curLe === l ? null : l;
-        applyQuestEnvOverride({ le: nextLe, reconnect: false, openSheet: true });
-      });
-    });
-
-    updateQuestLiveStatusUI();
   }
 
   // Kho câu hỏi Đố vui Phật pháp (tự động đồng bộ từ gói { t: "quiz-practice" } của máy chủ + bộ câu hỏi chuẩn dự phòng)
@@ -2399,33 +1175,11 @@
         let payload = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
         if (payload) {
           // BẮT BUỘC ĐẢM BẢO CID KHÔNG TRÙNG LẶP CHO CLONE TAB ĐỂ SERVER KHÔNG BÁO "Chùa đang mở ở nơi khác"
-          if (payload.t === "hello") {
-            if (pendingHelloOverrides) {
-              if (pendingHelloOverrides.gio === null) delete payload.gio;
-              else if (pendingHelloOverrides.gio !== undefined && Number.isFinite(Number(pendingHelloOverrides.gio))) {
-                payload.gio = Number(pendingHelloOverrides.gio);
-              }
-              if (pendingHelloOverrides.le === null || pendingHelloOverrides.le === "") delete payload.le;
-              else if (typeof pendingHelloOverrides.le === "string" && pendingHelloOverrides.le) {
-                payload.le = pendingHelloOverrides.le;
-              }
-              if (pendingHelloOverrides.adopt !== undefined) {
-                payload.adopt = Boolean(pendingHelloOverrides.adopt);
-              }
-            }
-            if (isCloneTab) {
-              payload.cid = cloneTabCid;
-              payload.name = `Đệ tử #${currentCloneId}`;
-              console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct UUID:`, cloneTabCid, "Name:", payload.name);
-            }
+          if (payload.t === "hello" && isCloneTab) {
+            payload.cid = cloneTabCid;
+            payload.name = `Đệ tử #${currentCloneId}`;
             args[0] = JSON.stringify(payload);
-            lastHelloPayload = { ...payload };
-          }
-          if (payload.t === "merit") {
-            if (customQuestSession && customQuestSession.active) {
-              setTimeout(() => dispatchCustomMeritToGame(), 20);
-            }
-            setTimeout(decorateMeritSheetUI, 120);
+            console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct UUID:`, cloneTabCid, "Name:", payload.name);
           }
           if (payload.t === "lv-xuong") {
             lastLandedCraneTime = Date.now();
@@ -2462,7 +1216,6 @@
                   syncChanhDienStateToServer();
                   origSend.apply(savedWs, savedArgs);
                   lastOwnBowTime = Date.now();
-                  recordQuestActionProgress("lay");
                   broadcastSwarmBow();
                   log(`👑 [Chủ trì] Đệ tử đã vào tư thế lạy -> Gửi gói lạy của Chủ trì để hợp nhất Đồng Tâm!`, "ok");
                 } catch {}
@@ -2471,13 +1224,9 @@
               return;
             }
             lastOwnBowTime = Date.now();
-            recordQuestActionProgress("lay");
             if (!isCloneTab && swarmRole === "master") {
               broadcastSwarmBow();
             }
-          }
-          if (payload.t === "emote" && payload.e && payload.e !== "lay") {
-            recordQuestActionProgress(payload.e);
           }
           if (payload.t === "viec") {
             if (payload.k === "quet") {
@@ -2485,7 +1234,6 @@
               doneOnce.add("quet");
               saveServerChores();
               saveDoneOnce();
-              recordQuestActionProgress("quet");
               try { updateTagUI(); } catch {}
               try { updateTodayStatsUI(); } catch {}
             } else if (payload.k === "ca") {
@@ -2493,7 +1241,6 @@
               doneOnce.add("ca");
               saveServerChores();
               saveDoneOnce();
-              recordQuestActionProgress("ca");
               try { updateTagUI(); } catch {}
               try { updateTodayStatsUI(); } catch {}
             } else if (payload.k === "den") {
@@ -2501,7 +1248,6 @@
               doneOnce.add("lamp");
               saveServerChores();
               saveDoneOnce();
-              recordQuestActionProgress("den");
               try { updateTagUI(); } catch {}
               try { updateTodayStatsUI(); } catch {}
             }
@@ -2511,45 +1257,8 @@
             doneOnce.add("thoikhoa");
             saveServerChores();
             saveDoneOnce();
-            recordQuestActionProgress("tk-done");
             try { updateTagUI(); } catch {}
             try { updateTodayStatsUI(); } catch {}
-          }
-          if (
-            [
-              "incense",
-              "ban-incense",
-              "san-incense",
-              "am-incense",
-              "qa-incense",
-              "lamp",
-              "bell",
-              "water",
-              "plant",
-              "pick",
-              "offer-flowers",
-              "lantern",
-              "xam",
-              "chu-xin",
-              "chu-giu",
-              "chu-dem",
-              "pet-pat",
-              "pet-feed",
-              "tk-read",
-              "mo",
-              "beads"
-            ].includes(payload.t)
-          ) {
-            recordQuestActionProgress(payload.t);
-          }
-          if (payload.t === "state" && Number(payload.s) === 2) {
-            recordQuestActionProgress("meditate");
-          }
-          if (payload.t === "claim" && payload.q && customQuestSession && customQuestSession.active) {
-            handleCustomQuestClaim(payload.q);
-          }
-          if (payload.t === "claim-le" && customQuestSession && customQuestSession.active) {
-            handleCustomFestivalClaim();
           }
           // Đố vui Phật pháp mở ngoài giờ: Chặn gói { t: "quiz" } từ pull() để server không trả về phase="off" và không gây chớp giao diện
           if (payload.t === "quiz" && customQuizSession.active) {
@@ -2581,36 +1290,11 @@
       Object.defineProperty(WebSocket.prototype, "onmessage", {
         set(fn) {
           activeWs = this;
-          lastGameOnMessageFn = fn;
           const wrapped = function(event) {
-            let isMeritMsg = false;
             try {
               if (typeof event.data === "string") {
                 const msg = JSON.parse(event.data);
-                if (msg && msg.t === "merit") isMeritMsg = true;
                 syncServerMessage(msg);
-
-                // Khi phiên Reset / Xoay Nhiệm Vụ (customQuestSession) đang hoạt động:
-                // Ghi đè gói tin { t: "merit" }, { t: "welcome" }, { t: "chores" } trước khi đẩy vào game engine (Vs.update / va / Eh.done)
-                if (customQuestSession && customQuestSession.active) {
-                  if (msg.t === "merit" && msg.me && !msg._atdSimulated) {
-                    event = new MessageEvent("message", { data: JSON.stringify(msg) });
-                  } else if (msg.t === "welcome" && msg.chores) {
-                    msg.chores = {
-                      quet: Boolean(serverChores.quet),
-                      ca: Boolean(serverChores.ca),
-                      den: Boolean(serverChores.den)
-                    };
-                    event = new MessageEvent("message", { data: JSON.stringify(msg) });
-                  } else if (msg.t === "chores" && msg.c && !msg._atdSimulated) {
-                    msg.c = {
-                      quet: Boolean(serverChores.quet),
-                      ca: Boolean(serverChores.ca),
-                      den: Boolean(serverChores.den)
-                    };
-                    event = new MessageEvent("message", { data: JSON.stringify(msg) });
-                  }
-                }
 
                 // Lưu câu hỏi Đố vui Phật pháp từ gói { t: "quiz-practice", qs }
                 if (msg.t === "quiz-practice" && Array.isArray(msg.qs)) {
@@ -2695,12 +1379,7 @@
                 }
               }
             } catch {}
-            const res = fn.call(this, event);
-            if (isMeritMsg) {
-              setTimeout(decorateMeritSheetUI, 30);
-              setTimeout(updateQuestLiveStatusUI, 35);
-            }
-            return res;
+            return fn.call(this, event);
           };
           return origOnMessageDesc.set.call(this, wrapped);
         },
@@ -3200,7 +1879,6 @@
         await sleep(6300, myRun);
       }
     } else {
-      recordQuestActionProgress("tk-done");
       log("Thời khóa hôm nay đã hoàn thành từ trước.", "ok");
     }
 
@@ -3352,16 +2030,8 @@
       await sleep(3200, myRun);
     }
 
-    // Nếu đang có nhiệm vụ Lạy Phật (lay / lay27) hoặc bước lễ Lạy Phật chưa xong, luôn thực hiện lạy để hoàn thành nhiệm vụ
-    const hasUnfinishedBowQuest = Boolean(
-      (customQuestSession && customQuestSession.active && (
-        (Array.isArray(customQuestSession.quests) && customQuestSession.quests.some((q) => (q.id === "lay" || q.id === "lay27") && !q.claimed && q.have < q.need)) ||
-        (customQuestSession.le && !customQuestSession.le.claimed && Array.isArray(customQuestSession.le.steps) && customQuestSession.le.steps.some((s) => s.id === "lay" && s.have < s.need))
-      )) ||
-      (lastMeritMe && Array.isArray(lastMeritMe.quests) && lastMeritMe.quests.some((q) => (q.id === "lay" || q.id === "lay27") && !q.claimed && q.have < q.need))
-    );
-
-    if (hasUnfinishedBowQuest || (minPeersToBow <= 1 && !enabledTasks.has("dongtam"))) {
+    // Nếu minPeersToBow > 1 hoặc đang bật Lạy đồng tâm: không lạy lẻ ở đây để tránh lãng phí ngưỡng công đức
+    if (minPeersToBow <= 1 && !enabledTasks.has("dongtam")) {
       const layBtn = findActionBtn("Lạy");
       if (layBtn && !layBtn.disabled) {
         fireClick(layBtn);
@@ -3610,7 +2280,6 @@
       await sleep(350, myRun);
       const toast = getToastText();
       if (toast.includes("đã thắp một ngọn đèn rồi")) {
-        recordQuestActionProgress("lamp");
         log("Hôm nay bạn đã thắp đèn Chánh điện rồi.", "ok");
         return true;
       }
@@ -3681,7 +2350,6 @@
         sheet = await openGardenSheet();
         await sleep(400, myRun);
       } else {
-        recordQuestActionProgress("water");
         log("Luống hoa của bạn hôm nay đã được tưới.", "info");
       }
     }
@@ -3757,7 +2425,6 @@
       // Kiểm tra thông báo: nếu Do.quet === true thì hôm nay đã nhận công đức quét lá rồi
       const toast = getToastText();
       if (toast.includes("gió lại thổi lá rụng")) {
-        recordQuestActionProgress("quet");
         log("Quét lá hôm nay đã được ghi nhận công đức từ trước.", "ok");
         fireClick($(".chore-pill.show button"));
         await sleep(250, myRun);
@@ -3921,24 +2588,16 @@
     return true;
   }
 
-  // 13. Vườn Linh Thú ({ t: "linhthu" }, { t: "pet-pat" })
+  // 13. Vườn Linh Thú ({ t: "linhthu" })
   async function runLinhThu(myRun) {
     const ok = await teleportToPlace(PLACES.VUON_LINH_THU, "Vườn Linh Thú", myRun);
     if (!ok) return false;
 
     const petBtn = await waitFor(() => findActionBtn("Linh thú") || findActionBtn("Cho ăn"), 2000, myRun);
     if (petBtn) {
-      log("Thăm Vườn Linh Thú & vuốt ve linh thú ({ t: 'pet-pat' })…", "ok");
+      log("Thăm Vườn Linh Thú & tương tác linh thú cưng…", "ok");
+      await sleep(1500, myRun);
     }
-    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
-      for (const petKind of ["meo", "tho", "huou"]) {
-        try {
-          activeWs.send(JSON.stringify({ t: "pet-pat", res: petKind }));
-        } catch {}
-        await sleep(250, myRun);
-      }
-    }
-    await sleep(1000, myRun);
     return true;
   }
 
@@ -4225,7 +2884,6 @@
       log(`Xin chữ Thầy đồ: "${wishText}" ({ t: "chu-xin" })…`, "ok");
       await sleep(1500, myRun);
     } else {
-      recordQuestActionProgress("chu-xin");
       log("Hôm nay đã xin chữ Thầy đồ rồi.", "info");
     }
 
@@ -4729,7 +3387,7 @@
       }
 
       // Nhận thưởng lễ hội nếu đủ tiến độ ({ t: "claim-le" })
-      const claimLeBtn = $("[data-claim-le]:not([disabled]), [data-claimle]:not([disabled])", sheet);
+      const claimLeBtn = $("[data-claimle]:not([disabled])", sheet);
       if (claimLeBtn && visible(claimLeBtn)) {
         fireClick(claimLeBtn);
         claimedCount++;
@@ -4737,8 +3395,8 @@
         await sleep(500, myRun);
       }
 
-      // Nhận tất cả nếu có nút [data-claim-all] / [data-claimall]
-      const claimAllBtn = $("[data-claim-all]:not([disabled]), [data-claimall]:not([disabled])", sheet);
+      // Nhận tất cả nếu có nút [data-claimall]
+      const claimAllBtn = $("[data-claimall]:not([disabled])", sheet);
       if (claimAllBtn && visible(claimAllBtn)) {
         fireClick(claimAllBtn);
         claimedCount++;
@@ -5399,48 +4057,6 @@
                 </button>
               </div>
             </div>
-            <div class="atd-quest-reset-box" id="atd-quest-reset-box">
-              <div class="atd-quest-reset-head">
-                <span>🔄 <b>Reset & Xoay Nhiệm Vụ Hằng Ngày & Tuần</b>:</span>
-                <button type="button" class="atd-q-open-board" id="atd-btn-open-merit" title="Mở bảng Nhiệm vụ của chùa">📜 Mở Bảng NV</button>
-              </div>
-              <div class="atd-quest-reset-btns">
-                <button type="button" class="atd-q-btn c1" id="atd-btn-reset-c1" title="Cách 1: Reset toàn bộ các nhiệm vụ Ngày & Tuần đã hoàn thành (Đã nhận) về 0/need để làm và trả lại nhiệm vụ nhận công đức">
-                  🔄 Cách 1: Reset NV Ngày (0/need)
-                </button>
-                <button type="button" class="atd-q-btn weekly" id="atd-btn-reset-weekly" title="Reset toàn bộ các nhiệm vụ Tuần đã hoàn thành về 0/need để làm và trả lại nhiệm vụ nhận công đức tuần">
-                  📅 Reset NV Tuần (0/need)
-                </button>
-              </div>
-              <div class="atd-quest-reset-btns">
-                <button type="button" class="atd-q-btn c2" id="atd-btn-rotate-c2" title="Cách 2: Đổi sang bảng 5 nhiệm vụ hằng ngày mới khác + xoay Lễ hội ở 0/need để làm và trả tiếp">
-                  ⚡ Cách 2: Đổi 5 NV Ngày Mới
-                </button>
-                <button type="button" class="atd-q-btn claim" id="atd-btn-claim-all24" title="Nhận thưởng toàn bộ nhiệm vụ đã đủ chỉ số + quét 24 mã nhiệm vụ">
-                  🎁 Nhận Thưởng Tất Cả NV
-                </button>
-              </div>
-              <div class="atd-q-chip-row">
-                <span>⏰ Giờ (gio):</span>
-                <div class="atd-q-chips">
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="6" title="Đặt khung giờ 6h sáng & làm mới bảng nhiệm vụ">6h</button>
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="12" title="Đặt khung giờ 12h trưa & làm mới bảng nhiệm vụ">12h</button>
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="17" title="Đặt khung giờ 17h chiều (mở Hạc trắng)">17h</button>
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="19" title="Đặt khung giờ 19h tối (mở Thắp đèn Chánh điện)">19h</button>
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="22" title="Đặt khung giờ 22h đêm (mở Xin chữ đêm)">22h</button>
-                  <button type="button" class="atd-q-chip atd-q-gio-btn" data-gio="30" title="Đặt offset +24h (gio=30) & làm mới phiên">+24h</button>
-                </div>
-              </div>
-              <div class="atd-q-chip-row">
-                <span>🏮 Lễ (le):</span>
-                <div class="atd-q-chips">
-                  ${FESTIVAL_LIST.map((f) => `<button type="button" class="atd-q-chip atd-q-le-btn" data-le="${f.id}" title="Kích hoạt nhiệm vụ lễ hội ${f.label} trên bảng Nhiệm vụ">${f.label}</button>`).join("")}
-                </div>
-              </div>
-              <div class="atd-quest-live-status" id="atd-quest-live-status">
-                <span>📋 Bảng NV: Đang đồng bộ từ máy chủ…</span>
-              </div>
-            </div>
           </div>
         </div>
         <div class="atd-today-box">
@@ -5479,7 +4095,7 @@
 
     $("#atd-start", panel).addEventListener("click", start);
     $("#atd-stop", panel).addEventListener("click", () => stop("Đã dừng theo yêu cầu."));
-    $("#atd-reset", panel).addEventListener("click", () => triggerResetDailyMethod1(false));
+    $("#atd-reset", panel).addEventListener("click", resetDailyState);
 
     $("#atd-loop", panel).addEventListener("change", (e) => {
       loopMode = e.target.checked;
@@ -5688,69 +4304,9 @@
       log("Đã gửi yêu cầu đồng bộ tiến độ & ngưỡng từ máy chủ chùa.", "info");
     });
 
-    $("#atd-btn-open-merit", panel)?.addEventListener("click", () => {
-      const meritSheet = document.querySelector(".sheet.merit");
-      if (meritSheet && meritSheet.classList.contains("open")) {
-        queryServerMerit();
-      } else {
-        clickMenu("nhiemvu");
-      }
-      setTimeout(decorateMeritSheetUI, 150);
-    });
-
-    $("#atd-btn-reset-c1", panel)?.addEventListener("click", () => {
-      triggerResetDailyMethod1(false);
-    });
-
-    $("#atd-btn-reset-weekly", panel)?.addEventListener("click", () => {
-      triggerResetWeeklyQuests(false);
-    });
-
-    $("#atd-btn-rotate-c2", panel)?.addEventListener("click", () => {
-      triggerRotateQuestsMethod2(false);
-    });
-
-    $("#atd-btn-farm-levelup", panel)?.addEventListener("click", () => {
-      triggerFarmLevelUpForNewQuests();
-    });
-
-    $("#atd-btn-claim-all24", panel)?.addEventListener("click", () => {
-      claimAllServerQuests(false);
-    });
-
-    $$(".atd-q-gio-btn", panel).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const g = btn.dataset.gio;
-        const curGio = urlSearchParam("gio");
-        const nextGio = String(curGio) === String(g) ? null : g;
-        applyQuestEnvOverride({ gio: nextGio, reconnect: true, openSheet: false });
-      });
-    });
-
-    $$(".atd-q-le-btn", panel).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const l = btn.dataset.le;
-        const curLe = urlSearchParam("le");
-        const nextLe = curLe === l ? null : l;
-        applyQuestEnvOverride({ le: nextLe, reconnect: true, openSheet: false });
-      });
-    });
-
-    // Tự động chèn thanh công cụ Cách 1 & Cách 2 mỗi khi mở bảng Nhiệm vụ (.sheet.merit)
-    try {
-      const meritObserver = new MutationObserver(() => {
-        const meritSheet = document.querySelector(".sheet.merit.open");
-        if (meritSheet && !meritSheet.querySelector(".atd-merit-inject-bar")) {
-          decorateMeritSheetUI();
-        }
-      });
-      meritObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-    } catch {}
-
     updateTagUI();
     updateTodayStatsUI();
     updateSwarmInfoUI();
-    updateQuestLiveStatusUI();
     setTimeout(queryServerMerit, 1500);
 
     if (isCloneTab) {
