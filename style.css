@@ -1070,3 +1070,270 @@
   color: #34d399;
   margin-left: 6px;
 }
+
+/* --- Reset & Xoay Nhiệm Vụ Hằng Ngày (Cách 1 & Cách 2) --- */
+.atd-quest-reset-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.09) 0%, rgba(52, 211, 153, 0.06) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+.atd-quest-reset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #fbbf24;
+}
+.atd-quest-reset-head b {
+  color: #fff;
+}
+.atd-q-open-board {
+  background: rgba(229, 188, 114, 0.16);
+  border: 1px solid rgba(229, 188, 114, 0.4);
+  color: #fcefd2;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.atd-q-open-board:hover {
+  background: rgba(229, 188, 114, 0.35);
+  border-color: #e5bc72;
+  color: #fff;
+}
+.atd-quest-reset-btns {
+  display: flex;
+  gap: 6px;
+}
+.atd-q-btn {
+  flex: 1;
+  padding: 5.5px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.atd-q-btn.c1 {
+  background: rgba(52, 211, 153, 0.16);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  color: #d1fae5;
+}
+.atd-q-btn.c1:hover {
+  background: rgba(52, 211, 153, 0.32);
+  border-color: #34d399;
+  color: #fff;
+  transform: translateY(-1px);
+}
+.atd-q-btn.weekly {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  color: #e0f2fe;
+}
+.atd-q-btn.weekly:hover {
+  background: rgba(56, 189, 248, 0.35);
+  border-color: #38bdf8;
+  color: #fff;
+  transform: translateY(-1px);
+}
+.atd-q-btn.c2 {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.45) 100%);
+  border: 1px solid rgba(251, 191, 36, 0.7);
+  color: #fef3c7;
+}
+.atd-q-btn.c2:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.5) 0%, rgba(217, 119, 6, 0.65) 100%);
+  border-color: #fbbf24;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+.atd-q-btn.run {
+  background: linear-gradient(135deg, #e5bc72 0%, #b88636 100%);
+  border: 1px solid #f3d28e;
+  color: #1c1305;
+  font-weight: 700;
+}
+.atd-q-btn.run:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(229, 188, 114, 0.35);
+}
+.atd-q-btn.claim {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(229, 188, 114, 0.32);
+  color: #fcefd2;
+}
+.atd-q-btn.claim:hover {
+  background: rgba(229, 188, 114, 0.22);
+  border-color: #e5bc72;
+  color: #fff;
+}
+.atd-q-chip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  font-size: 10px;
+  color: #d6cbb9;
+}
+.atd-q-chip-row > span {
+  flex-shrink: 0;
+  color: #e5bc72;
+  font-weight: 600;
+}
+.atd-q-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3.5px;
+  justify-content: flex-end;
+}
+.atd-q-chip {
+  padding: 2px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #d6cbb9;
+  transition: all 0.14s ease;
+}
+.atd-q-chip:hover {
+  background: rgba(229, 188, 114, 0.22);
+  border-color: rgba(229, 188, 114, 0.55);
+  color: #fff;
+}
+.atd-q-chip.on {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.38) 0%, rgba(180, 83, 9, 0.52) 100%);
+  border-color: #fbbf24;
+  color: #fff;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.35);
+}
+.atd-quest-live-status {
+  font-size: 10px;
+  color: #dfd6c7;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 5px 7px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  line-height: 1.35;
+}
+
+/* Thanh công cụ Cách 1 & Cách 2 chèn trực tiếp trong Bảng Nhiệm Vụ (.sheet.merit) */
+.atd-merit-inject-bar {
+  margin: 4px 0 12px;
+  padding: 9px 11px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(52, 211, 153, 0.08) 100%);
+  border: 1px solid rgba(229, 188, 114, 0.42);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.atd-merit-inject-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: #fbbf24;
+}
+.atd-merit-inject-head small {
+  font-size: 10px;
+  color: #e5bc72;
+}
+.atd-merit-inject-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.atd-m-btn {
+  flex: 1;
+  min-width: 110px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.atd-m-btn.c1 {
+  background: rgba(52, 211, 153, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  color: #d1fae5;
+}
+.atd-m-btn.c1:hover {
+  background: rgba(52, 211, 153, 0.32);
+  color: #fff;
+}
+.atd-m-btn.weekly {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  color: #e0f2fe;
+}
+.atd-m-btn.weekly:hover {
+  background: rgba(56, 189, 248, 0.35);
+  border-color: #38bdf8;
+  color: #fff;
+}
+.atd-m-btn.c2 {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(217, 119, 6, 0.5) 100%);
+  border: 1px solid #fbbf24;
+  color: #fef3c7;
+}
+.atd-m-btn.c2:hover {
+  filter: brightness(1.1);
+  color: #fff;
+}
+.atd-m-btn.run {
+  background: linear-gradient(135deg, #e5bc72 0%, #b88636 100%);
+  border: 1px solid #f3d28e;
+  color: #1c1305;
+  font-weight: 700;
+}
+.atd-merit-inject-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  color: #e5bc72;
+}
+.atd-merit-inject-chips > span {
+  font-weight: 600;
+  margin-right: 2px;
+}
+.atd-m-chip {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e2d8c7;
+  transition: all 0.14s ease;
+}
+.atd-m-chip:hover {
+  background: rgba(229, 188, 114, 0.25);
+  border-color: #e5bc72;
+  color: #fff;
+}
+.atd-m-chip.on {
+  background: rgba(245, 158, 11, 0.38);
+  border-color: #fbbf24;
+  color: #fff;
+}
