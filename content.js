@@ -261,29 +261,33 @@
   class HeadlessDiscipleManager {
     constructor() {
       this.disciples = [];
-      this.targetCount = 4;
+      const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
+      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(20, savedCount);
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
-      this.hallOffsets = [
-        { x: -1.2, z: -2.8 },
-        { x: 1.2, z: -2.8 },
-        { x: -2.2, z: -3.5 },
-        { x: 2.2, z: -3.5 },
-        { x: 0, z: -3.8 },
-        { x: -3.0, z: -4.0 },
-        { x: 3.0, z: -4.0 }
-      ];
     }
 
-    start(count = 4) {
+    getOffsetForIndex(index) {
+      const row = Math.floor((index - 1) / 5);
+      const col = (index - 1) % 5;
+      const xPositions = [-2.4, -1.2, 0, 1.2, 2.4];
+      return {
+        x: xPositions[col] != null ? xPositions[col] : 0,
+        z: -2.6 - (row * 0.8)
+      };
+    }
+
+    start(count) {
+      if (typeof count === "number" && !isNaN(count) && count >= 1 && count <= 20) {
+        this.targetCount = count;
+      }
       this.stop(false);
       this.enabled = true;
-      this.targetCount = count;
       const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
-      log(`⚡ Đang kết nối ${count} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
+      log(`⚡ Đang kết nối ${this.targetCount} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
 
-      for (let i = 1; i <= count; i++) {
+      for (let i = 1; i <= this.targetCount; i++) {
         this.spawnDisciple(i, curRoom);
       }
 
@@ -311,7 +315,7 @@
         name: `Đệ tử ngầm #${index}`,
         cid,
         room,
-        offset: this.hallOffsets[(index - 1) % this.hallOffsets.length],
+        offset: this.getOffsetForIndex(index),
         connected: false,
         ready: false,
         myId: null,
@@ -485,8 +489,13 @@
       const badge = $("#atd-headless-badge");
       const btn = $("#atd-btn-toggle-headless");
       const statusEl = $("#atd-headless-status");
+      const input = $("#atd-headless-count-input");
       const readyCount = this.getActiveCount();
       const total = this.getTotalCount();
+
+      if (input && document.activeElement !== input) {
+        input.value = this.targetCount;
+      }
 
       if (badge) {
         badge.className = `atd-headless-badge ${this.enabled ? "on" : "off"}`;
@@ -499,7 +508,7 @@
           btn.classList.remove("highlight");
           btn.classList.add("danger");
         } else {
-          btn.textContent = `⚡ Bật 4 Đệ tử ngầm (0 Tab)`;
+          btn.textContent = `⚡ Bật ${this.targetCount} Đệ tử ngầm (0 Tab)`;
           btn.classList.remove("danger");
           btn.classList.add("highlight");
         }
@@ -4306,10 +4315,24 @@
                 <span id="atd-headless-badge" class="atd-headless-badge off">Chưa bật</span>
               </div>
               <div class="atd-clone-desc">
-                Tự động kết nối 4 đệ tử ngầm vào Chánh điện ngay trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
+                Kết nối đệ tử ngầm vào Chánh điện ngay trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
+              </div>
+              <div class="atd-headless-input-row">
+                <div class="atd-headless-input-label">
+                  <span>👥 Số lượng đệ tử:</span>
+                </div>
+                <div class="atd-headless-input-ctrl">
+                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="20" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 20)" />
+                  <div class="atd-headless-presets">
+                    <button type="button" class="atd-headless-preset-btn" data-count="2" title="Chọn nhanh 2 đệ tử">2</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn nhanh 4 đệ tử (chuẩn Đồng Tâm x5)">4</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="6" title="Chọn nhanh 6 đệ tử">6</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn nhanh 10 đệ tử">10</button>
+                  </div>
+                </div>
               </div>
               <div class="atd-clone-btns">
-                <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt 4 đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
+                <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
                   ⚡ Bật 4 Đệ tử ngầm (0 Tab)
                 </button>
                 <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
@@ -4525,13 +4548,55 @@
     if (btnHacDua) {
       btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
     }
+    const inputHeadlessCount = $("#atd-headless-count-input", panel);
+    if (inputHeadlessCount) {
+      inputHeadlessCount.value = headlessDisciples.targetCount;
+      const handleCountChange = () => {
+        let val = parseInt(inputHeadlessCount.value, 10);
+        if (isNaN(val) || val < 1) val = 1;
+        if (val > 20) val = 20;
+        inputHeadlessCount.value = val;
+        localStorage.setItem("atd_headless_count", String(val));
+        headlessDisciples.targetCount = val;
+        if (headlessDisciples.enabled) {
+          headlessDisciples.start(val);
+        } else {
+          headlessDisciples.updateUI();
+        }
+      };
+      inputHeadlessCount.addEventListener("change", handleCountChange);
+      inputHeadlessCount.addEventListener("input", () => {
+        let val = parseInt(inputHeadlessCount.value, 10);
+        if (!isNaN(val) && val >= 1 && val <= 20) {
+          headlessDisciples.targetCount = val;
+          localStorage.setItem("atd_headless_count", String(val));
+          if (!headlessDisciples.enabled) {
+            headlessDisciples.updateUI();
+          }
+        }
+      });
+    }
+
+    $$(".atd-headless-preset-btn", panel).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const count = parseInt(btn.dataset.count, 10);
+        if (!isNaN(count) && inputHeadlessCount) {
+          inputHeadlessCount.value = count;
+          inputHeadlessCount.dispatchEvent(new Event("change"));
+        }
+      });
+    });
+
     const btnToggleHeadless = $("#atd-btn-toggle-headless", panel);
     if (btnToggleHeadless) {
       btnToggleHeadless.addEventListener("click", () => {
         if (headlessDisciples.enabled) {
           headlessDisciples.stop();
         } else {
-          headlessDisciples.start(4);
+          let count = inputHeadlessCount ? parseInt(inputHeadlessCount.value, 10) : headlessDisciples.targetCount;
+          if (isNaN(count) || count < 1) count = 1;
+          if (count > 20) count = 20;
+          headlessDisciples.start(count);
         }
       });
     }

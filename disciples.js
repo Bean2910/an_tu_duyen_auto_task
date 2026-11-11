@@ -52,15 +52,15 @@ let autoBow = args.includes("--auto");
 const SERVER_URL = "wss://didenchua.online/ws";
 
 // Tọa độ đứng quỳ trong Chánh điện cho các đệ tử
-const HALL_OFFSETS = [
-  { x: -1.2, z: -2.8 },
-  { x: 1.2, z: -2.8 },
-  { x: -2.2, z: -3.5 },
-  { x: 2.2, z: -3.5 },
-  { x: 0, z: -3.8 },
-  { x: -3.0, z: -4.0 },
-  { x: 3.0, z: -4.0 }
-];
+function getHallOffset(index) {
+  const row = Math.floor((index - 1) / 5);
+  const col = (index - 1) % 5;
+  const xPositions = [-2.4, -1.2, 0, 1.2, 2.4];
+  return {
+    x: xPositions[col] != null ? xPositions[col] : 0,
+    z: -2.6 - (row * 0.8)
+  };
+}
 
 class Disciple {
   constructor(index, room) {
@@ -68,7 +68,7 @@ class Disciple {
     this.name = `Đệ tử ngầm #${index}`;
     this.room = room;
     this.cid = crypto.randomUUID();
-    this.offset = HALL_OFFSETS[(index - 1) % HALL_OFFSETS.length];
+    this.offset = getHallOffset(index);
     this.ws = null;
     this.connected = false;
     this.ready = false;
@@ -256,6 +256,23 @@ function stopAutoBow() {
   console.log(`\x1b[33m[CHẾ ĐỘ TỰ ĐỘNG] Đã tắt tự động lạy.\x1b[0m`);
 }
 
+function adjustDiscipleCount(newCount) {
+  if (newCount === disciples.length) return;
+  if (newCount < disciples.length) {
+    const removed = disciples.splice(newCount);
+    removed.forEach((d) => d.stop());
+    console.log(`\x1b[33m[ĐIỀU CHỈNH] Đã giảm bớt còn ${newCount} đệ tử.\x1b[0m`);
+  } else {
+    const currentLen = disciples.length;
+    for (let i = currentLen + 1; i <= newCount; i++) {
+      const d = new Disciple(i, targetRoom);
+      disciples.push(d);
+      setTimeout(() => d.connect(), (i - currentLen) * 200);
+    }
+    console.log(`\x1b[32m[ĐIỀU CHỈNH] Đang kết nối thêm lên tổng cộng ${newCount} đệ tử!\x1b[0m`);
+  }
+}
+
 function printHeader() {
   console.clear();
   console.log("\x1b[1;36m========================================================================\x1b[0m");
@@ -268,6 +285,7 @@ function printHeader() {
   console.log("\x1b[1;36m------------------------------------------------------------------------\x1b[0m");
   console.log("\x1b[1;37mLỆNH ĐIỀU KHIỂN:\x1b[0m");
   console.log("  • \x1b[1;33mNhấn phím Space hoặc Enter\x1b[0m: Toàn bộ đệ tử lạy ngay lập tức");
+  console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
   console.log("  • \x1b[1;33mGõ 'status' + Enter\x1b[0m      : Kiểm tra trạng thái đệ tử");
   console.log("  • \x1b[1;33mGõ 'room <tên>' + Enter\x1b[0m  : Đổi phòng (VD: room chua-2)");
@@ -297,6 +315,13 @@ rl.on("line", (line) => {
   const cmd = line.trim().toLowerCase();
   if (cmd === "" || cmd === "lay" || cmd === "l") {
     bowAllDisciples();
+  } else if (cmd.startsWith("count ") || cmd.startsWith("c ")) {
+    const newCount = parseInt(cmd.replace(/^(count|c)\s+/, ""), 10);
+    if (!isNaN(newCount) && newCount >= 1 && newCount <= 30) {
+      adjustDiscipleCount(newCount);
+    } else {
+      console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 30!\x1b[0m");
+    }
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
@@ -329,3 +354,4 @@ process.on("SIGINT", () => {
   disciples.forEach((d) => d.stop());
   process.exit(0);
 });
+
