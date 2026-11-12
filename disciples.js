@@ -308,6 +308,7 @@ function getArg(name, defaultValue) {
 const targetCount = parseInt(getArg("count", "4"), 10) || 4;
 let targetRoom = getArg("room", "chua-1");
 let customName = getArg("name", "");
+let followTargetName = getArg("target", "");
 let autoBow = args.includes("--auto");
 let airWalk = args.includes("--air") || args.includes("--fly");
 let followPlayer = args.includes("--follow") || args.includes("--f");
@@ -598,6 +599,11 @@ class Disciple {
               p.lastUpdate = Date.now();
             }
           }
+        } else if (msg.t === "emote" && msg.e === "lay" && msg.id) {
+          // Khi người chơi mục tiêu (Acc chính) lạy, toàn bộ đệ tử lập tức lạy theo!
+          if (this.lastTargetPlayerId && String(msg.id) === String(this.lastTargetPlayerId)) {
+            this.bow();
+          }
         }
       } catch { }
     };
@@ -844,32 +850,29 @@ function startRoaming() {
         };
       }
 
-      // BÁM THEO NGƯỜI CHƠI KHÁC TRONG CHÙA (NẾU BẬT)
+      // BÁM THEO NGƯỜI CHƠI (ACC CHÍNH HOẶC MỤC TIÊU CỤ THỂ)
       let targetPlayer = null;
       if (followPlayer) {
         const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
         if (players.length > 0) {
-          const assignedIdx = (d.index - 1) % players.length;
-          targetPlayer = players[assignedIdx];
+          if (followTargetName) {
+            targetPlayer = players.find((p) => p.name && p.name.toLowerCase().includes(followTargetName.toLowerCase()));
+          }
+          if (!targetPlayer) {
+            // Mặc định: Tập trung toàn bộ đệ tử theo người chơi chính (thường là Acc chính của bạn)
+            targetPlayer = players[0];
+          }
         }
       }
 
       if (targetPlayer) {
+        d.lastTargetPlayerId = targetPlayer.id;
         let localSlot = 0;
-        if (lectureMode || corridorMode) {
-          const readyList = disciples
-            .filter((otherD) => otherD.ready && otherD.ws && otherD.ws.readyState === 1)
-            .sort((a, b) => a.index - b.index);
-          const foundIdx = readyList.indexOf(d);
-          localSlot = foundIdx >= 0 ? foundIdx : (d.index - 1);
-        } else {
-          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
-          const coFollowers = disciples.filter((otherD) => {
-            if (!otherD.ready) return false;
-            return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
-          }).sort((a, b) => a.index - b.index);
-          localSlot = Math.max(0, coFollowers.indexOf(d));
-        }
+        const readyList = disciples
+          .filter((otherD) => otherD.ready && otherD.ws && otherD.ws.readyState === 1)
+          .sort((a, b) => a.index - b.index);
+        const foundIdx = readyList.indexOf(d);
+        localSlot = foundIdx >= 0 ? foundIdx : (d.index - 1);
 
         const playerRy = targetPlayer.ry || 0;
 
@@ -1396,6 +1399,19 @@ rl.on("line", (line) => {
     autoFreeProxy = false;
     console.log("\x1b[33m[PROXY] Đã TẮT proxy, chuyển về kết nối trực tiếp!\x1b[0m");
     disciples.forEach((d) => d.reconnect());
+  } else if (cmd.startsWith("target ") || cmd === "target") {
+    const rawT = line.trim().replace(/^target\s*/, "").trim();
+    if (!rawT || rawT === "auto" || rawT === "all") {
+      followTargetName = "";
+      console.log(`\x1b[36m[MỤC TIÊU] Đã chuyển về tự động tập trung theo Acc chính trong chùa!\x1b[0m`);
+    } else {
+      followTargetName = rawT;
+      console.log(`\x1b[36m[MỤC TIÊU] Đã đặt mục tiêu bám theo: "${followTargetName}"!\x1b[0m`);
+    }
+    if (!followPlayer) {
+      followPlayer = true;
+      if (formationMode !== "roam") startRoaming();
+    }
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
