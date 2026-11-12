@@ -99,3 +99,4 @@ if exist "tor\tor\tor.exe" (
 echo.
 echo Sau khi tải Tor xong, vui lòng nhấp đúp lại file này để chạy!
 pause
+

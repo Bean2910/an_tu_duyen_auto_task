@@ -128,3 +128,4 @@ Khi cửa sổ Terminal đang chạy, bạn có thể gõ các lệnh sau và nh
 - **Khi muốn đổi người bám theo:**
   - Gõ `list` để xem số thứ tự của các đạo hữu trong phòng.
   - Gõ `target 2` để 100 đệ tử đồng loạt quay đầu sang bảo hộ và nghe pháp cùng đạo hữu số 2!
+
