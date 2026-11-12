@@ -262,7 +262,7 @@
     constructor() {
       this.disciples = [];
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
-      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(29, savedCount);
+      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
@@ -271,10 +271,10 @@
     }
 
     getOffsetForIndex(index) {
-      const cols = 6;
+      const cols = 8;
       const col = (index - 1) % cols;
       const row = Math.floor((index - 1) / cols);
-      const xStart = -3.0;
+      const xStart = -4.2;
       const xSpacing = 1.2;
       return {
         x: Math.round((xStart + col * xSpacing) * 100) / 100,
@@ -291,7 +291,7 @@
 
     start(count) {
       if (typeof count === "number" && !isNaN(count) && count >= 1) {
-        this.targetCount = Math.min(29, Math.max(1, count));
+        this.targetCount = Math.min(100, Math.max(1, count));
       }
       this.stop(true);
       this.enabled = true;
@@ -397,6 +397,14 @@
         this.updateUI();
         updateSwarmInfoUI();
         if (this.enabled) {
+          disciple.reconnectCount = (disciple.reconnectCount || 0) + 1;
+          // Nếu đệ tử đã thử lại 2 lần mà không được và hiện tại đã đạt trần IP (>= 29 đệ tử đang chạy),
+          // tạm dừng thử lại đệ tử này để tránh spam dồn dập và nghẽn mạng
+          if (disciple.reconnectCount >= 2 && this.getActiveCount() >= 29) {
+            disciple.ipLimited = true;
+            this.updateUI();
+            return;
+          }
           const rt = setTimeout(() => {
             if (this.enabled) {
               this.disciples = this.disciples.filter((d) => d !== disciple);
@@ -526,7 +534,15 @@
 
       if (badge) {
         badge.className = `atd-headless-badge ${this.enabled ? "on" : "off"}`;
-        badge.textContent = this.enabled ? `${readyCount}/${this.targetCount} Sẵn sàng` : "Chưa bật";
+        if (!this.enabled) {
+          badge.textContent = "Chưa bật";
+        } else if (readyCount >= this.targetCount) {
+          badge.textContent = `${readyCount}/${this.targetCount} Sẵn sàng`;
+        } else if (readyCount >= 29 && readyCount < this.targetCount) {
+          badge.textContent = `${readyCount}/${this.targetCount} (Kịch trần IP)`;
+        } else {
+          badge.textContent = `${readyCount}/${this.targetCount} Đang nạp…`;
+        }
       }
 
       if (btn) {
@@ -547,6 +563,9 @@
           if (readyCount >= this.targetCount) {
             statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ngầm</b> đang túc trực trong Chánh điện · 0 tab · 0% GPU`;
             statusEl.style.color = "#34d399";
+          } else if (readyCount >= 29 && this.targetCount > 29) {
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử sẵn sàng</b> · <span style="color:#f59e0b;">(Máy chủ kịch trần 30 kết nối/IP: 1 tab chính + 29 đệ tử)</span>`;
+            statusEl.style.color = "#38bdf8";
           } else {
             statusEl.innerHTML = `⏳ Đang kết nối đệ tử ngầm (${readyCount}/${this.targetCount})…`;
             statusEl.style.color = "#e5bc72";
@@ -4349,18 +4368,19 @@
                   <span>👥 Số lượng đệ tử:</span>
                 </div>
                 <div class="atd-headless-input-ctrl">
-                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="29" value="4" title="Số lượng đệ tử ngầm (tối đa 29 đệ tử/tab theo giới hạn IP của server chùa)" />
+                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
                   <div class="atd-headless-presets">
-                    <button type="button" class="atd-headless-preset-btn" data-count="2" title="Chọn 2 đệ tử">2</button>
                     <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn 4 đệ tử (Chuẩn ăn trọn x5 Đồng Tâm +9 công đức)">4 ⭐</button>
                     <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn 10 đệ tử">10</button>
                     <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn 20 đệ tử">20</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Mức tối đa IP cho phép)">29 Max</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Mức tối đa trên 1 IP mạng / WiFi)">29 (Trần IP)</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn 50 đệ tử (Đại tăng đoàn)">50</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn 100 đệ tử (Trăm đệ tử trợ duyên)">100</button>
                   </div>
                 </div>
               </div>
               <div class="atd-clone-tip" style="margin:2px 0 6px 0; font-size:9.5px; color:#e5bc72; line-height:1.35;">
-                💡 <b>Mẹo công đức:</b> Server chỉ tính thưởng tối đa <b>3 người lạy cùng (+9 công đức/lần)</b>. Chỉ cần <b>4 đệ tử</b> là bạn đã nhận trọn vẹn điểm thưởng tối đa của game! Máy chủ giới hạn kịch trần 30 kết nối/IP (1 tab chính + 29 đệ tử).
+                💡 <b>Mẹo công đức:</b> Server chỉ tính thưởng tối đa <b>3 người lạy cùng (+9 công đức/lần)</b>. Chỉ cần <b>4 đệ tử</b> là nhận trọn vẹn điểm thưởng kịch kim! Máy chủ giới hạn 30 kết nối/IP (1 tab chính + 29 đệ tử trên cùng 1 mạng WiFi).
               </div>
               <div class="atd-clone-btns">
                 <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
@@ -4585,7 +4605,7 @@
       const handleCountChange = () => {
         let val = parseInt(inputHeadlessCount.value, 10);
         if (isNaN(val) || val < 1) val = 1;
-        if (val > 29) val = 29;
+        if (val > 100) val = 100;
         inputHeadlessCount.value = val;
         localStorage.setItem("atd_headless_count", String(val));
         headlessDisciples.targetCount = val;
@@ -4598,7 +4618,7 @@
       inputHeadlessCount.addEventListener("change", handleCountChange);
       inputHeadlessCount.addEventListener("input", () => {
         let val = parseInt(inputHeadlessCount.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 29) {
+        if (!isNaN(val) && val >= 1 && val <= 100) {
           headlessDisciples.targetCount = val;
           localStorage.setItem("atd_headless_count", String(val));
           if (!headlessDisciples.enabled) {
@@ -4626,7 +4646,7 @@
         } else {
           let count = inputHeadlessCount ? parseInt(inputHeadlessCount.value, 10) : headlessDisciples.targetCount;
           if (isNaN(count) || count < 1) count = 1;
-          if (count > 29) count = 29;
+          if (count > 100) count = 100;
           headlessDisciples.start(count);
         }
       });
