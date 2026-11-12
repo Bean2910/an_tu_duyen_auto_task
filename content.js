@@ -539,6 +539,11 @@
           hint.textContent += " · 🛡️ 2 hàng tạo lối đi";
         }
       }
+
+      const greetPreview = $("#atd-greet-preview");
+      if (greetPreview && typeof headlessDisciples !== "undefined") {
+        greetPreview.textContent = `Xem trước: "${headlessDisciples.formatGreetingMessage()}"`;
+      }
     } catch (err) {
       console.warn("[ATD] updateFollowTargetDropdownUI error:", err);
     }
@@ -566,6 +571,7 @@
       this.lookSeed = Math.floor(Math.random() * 10000);
       this.greetTemplate = localStorage.getItem("atd_headless_greet_tpl") || "Chào sếp {name}";
       this.autoGreetOnSelect = localStorage.getItem("atd_headless_autogreet") === "true";
+      this.greetIncludeName = localStorage.getItem("atd_headless_greet_name") !== "false";
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
@@ -720,14 +726,34 @@
     }
 
     formatGreetingMessage(template) {
+      let tpl = (template !== undefined ? template : this.greetTemplate);
+      if (tpl == null) tpl = "";
+      tpl = tpl.trim();
+
+      if (!this.greetIncludeName) {
+        // Bỏ tên người đang theo dõi: chỉ chat nội dung người dùng nhập
+        if (!tpl) tpl = "Chào";
+        if (/{name}|{ten}/i.test(tpl)) {
+          return tpl.replace(/{name}|{ten}/gi, "").replace(/\s+/g, " ").trim();
+        }
+        return tpl;
+      }
+
+      // Có chọn kèm tên người đang theo dõi
+      if (!tpl) tpl = "Chào {name}";
       const rawTargetName = this.getChosenTargetName();
       const targetName = rawTargetName.replace(/^[👑👤\s]+/, "").trim();
-      let tpl = (template || this.greetTemplate || "Chào sếp {name}").trim();
-      if (!tpl) tpl = "Chào sếp {name}";
       if (/{name}|{ten}/i.test(tpl)) {
         return tpl.replace(/{name}|{ten}/gi, targetName);
       }
       return `${tpl} ${targetName}`;
+    }
+
+    setGreetIncludeName(enabled) {
+      this.greetIncludeName = !!enabled;
+      localStorage.setItem("atd_headless_greet_name", this.greetIncludeName ? "true" : "false");
+      log(this.greetIncludeName ? "💬 Đã BẬT kèm tên người theo dõi vào câu chat!" : "💬 Đã TẮT kèm tên người theo dõi (chỉ chat nội dung bạn nhập)!", "info");
+      this.updateUI();
     }
 
     setGreetTemplate(tpl) {
@@ -1715,6 +1741,10 @@
       const chkAutoGreet = $("#atd-chk-autogreet");
       if (chkAutoGreet) {
         chkAutoGreet.checked = this.autoGreetOnSelect;
+      }
+      const chkGreetName = $("#atd-chk-greet-name");
+      if (chkGreetName) {
+        chkGreetName.checked = this.greetIncludeName;
       }
       const greetPreview = $("#atd-greet-preview");
       if (greetPreview) {
@@ -5825,17 +5855,23 @@
                   </div>
                 </div>
                 <div style="margin-top:8px; padding-top:7px; border-top:1px dashed rgba(56,189,248,0.25);">
-                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-                    <span style="font-size:11px; color:#fde68a; font-weight:600;">💬 Chat chào theo tên người được chọn:</span>
-                    <label class="atd-autogreet-label" title="Tự động cho đệ tử chắp tay hô chào khi bạn chọn mục tiêu mới trong danh sách">
-                      <input type="checkbox" id="atd-chk-autogreet" checked />
-                      <span>Tự chào khi chọn</span>
-                    </label>
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+                    <span style="font-size:11px; color:#fde68a; font-weight:600;">💬 Chat theo mục tiêu:</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <label style="display:flex; align-items:center; gap:3px; font-size:10px; color:#fde68a; cursor:pointer;" title="Kèm tên người đang theo dõi vào câu chat (Bỏ chọn nếu chỉ muốn chat đúng câu bạn nhập, không kèm tên)">
+                        <input type="checkbox" id="atd-chk-greet-name" checked style="accent-color:#eab308; margin:0;" />
+                        <span>Kèm tên mục tiêu</span>
+                      </label>
+                      <label class="atd-autogreet-label" title="Tự động cho đệ tử chắp tay hô chào khi bạn chọn mục tiêu mới trong danh sách">
+                        <input type="checkbox" id="atd-chk-autogreet" checked />
+                        <span>Tự chào khi chọn</span>
+                      </label>
+                    </div>
                   </div>
                   <div style="display:flex; gap:5px; align-items:center;">
-                    <input type="text" id="atd-greet-template" style="flex:1; padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.85); color:#fef08a; border:1px solid rgba(250,204,21,0.35); border-radius:4px; outline:none;" placeholder="Chào sếp {name}" value="Chào sếp {name}" title="Nhập mẫu câu chat ({name} sẽ tự động thay bằng tên người được chọn)" />
-                    <button type="button" id="atd-btn-shout-greet" style="padding:4px 10px; font-size:11px; font-weight:600; background:linear-gradient(135deg, #eab308, #ca8a04); color:#000; border:none; border-radius:4px; cursor:pointer; white-space:nowrap;" title="Lệnh cho các đệ tử đồng thanh chắp tay hô to câu chào này ngay lập tức!">
-                      📣 Hô chào sếp!
+                    <input type="text" id="atd-greet-template" style="flex:1; padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.85); color:#fef08a; border:1px solid rgba(250,204,21,0.35); border-radius:4px; outline:none;" placeholder="Chào hoặc Chào sếp {name}" value="Chào sếp {name}" title="Nhập câu chat (Bật kèm tên thì sẽ tự ghép tên người đang theo dõi)" />
+                    <button type="button" id="atd-btn-shout-greet" style="padding:4px 10px; font-size:11px; font-weight:600; background:linear-gradient(135deg, #eab308, #ca8a04); color:#000; border:none; border-radius:4px; cursor:pointer; white-space:nowrap;" title="Lệnh cho toàn bộ đệ tử đồng thanh chắp tay hô to câu chat này ngay lập tức!">
+                      📣 Hô chào!
                     </button>
                   </div>
                   <div id="atd-greet-preview" style="font-size:10.5px; color:#fef08a; margin-top:3px; font-style:italic; opacity:0.9;">
@@ -6217,6 +6253,15 @@
     if (chkAutoGreet) {
       chkAutoGreet.checked = headlessDisciples.autoGreetOnSelect;
       chkAutoGreet.addEventListener("change", () => headlessDisciples.setAutoGreetOnSelect(chkAutoGreet.checked));
+    }
+    const chkGreetName = $("#atd-chk-greet-name", panel);
+    if (chkGreetName) {
+      chkGreetName.checked = headlessDisciples.greetIncludeName;
+      chkGreetName.addEventListener("change", () => {
+        headlessDisciples.setGreetIncludeName(chkGreetName.checked);
+        const preview = $("#atd-greet-preview", panel);
+        if (preview) preview.textContent = `Xem trước: "${headlessDisciples.formatGreetingMessage()}"`;
+      });
     }
     const inputGreetTpl = $("#atd-greet-template", panel);
     if (inputGreetTpl) {

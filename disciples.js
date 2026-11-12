@@ -63,6 +63,7 @@ if (rowsArg && !isNaN(parseInt(rowsArg, 10))) {
 let lectureFacing = getArg("facing", "front");
 let lectureOrient = (args.includes("--doc") || getArg("orient", "") === "doc") ? "doc" : "ngang";
 let randomLook = !args.includes("--uniform");
+let greetIncludeName = !args.includes("--no-name");
 let lookSeed = Math.floor(Math.random() * 10000);
 const SERVER_URL = "wss://didenchua.online/ws";
 
@@ -815,6 +816,24 @@ function adjustDiscipleCount(newCount) {
 }
 
 let isShoutingGreeting = false;
+
+function formatGreetingMessage(customMsg) {
+  let tpl = (customMsg || "Chào").trim();
+  if (!greetIncludeName) {
+    if (/{name}|{ten}/i.test(tpl)) {
+      return tpl.replace(/{name}|{ten}/gi, "").replace(/\s+/g, " ").trim() || "Chào";
+    }
+    return tpl;
+  }
+  const otherPlayers = Array.from(knownPlayers.values());
+  const targetPlayer = otherPlayers.length > 0 ? otherPlayers[0] : null;
+  const targetName = targetPlayer ? (targetPlayer.name || "Đạo hữu") : "Sư phụ";
+  if (/{name}|{ten}/i.test(tpl)) {
+    return tpl.replace(/{name}|{ten}/gi, targetName);
+  }
+  return `${tpl} ${targetName}`;
+}
+
 async function shoutGreeting(customMsg) {
   if (isShoutingGreeting) return;
   const readyDisciples = disciples.filter((d) => d.ready && d.ws);
@@ -824,7 +843,7 @@ async function shoutGreeting(customMsg) {
   }
   isShoutingGreeting = true;
   try {
-    const msg = (customMsg || "A Di Đà Phật! Kính chào quý sếp và chư vị đạo hữu!").trim();
+    const msg = formatGreetingMessage(customMsg);
     console.log(`\x1b[32m[ĐỒNG THANH CHÀO] Toàn bộ ${readyDisciples.length} đệ tử ở tất cả các hàng bắt đầu hô: "${msg}"\x1b[0m`);
     const delay = readyDisciples.length > 25 ? 40 : 60;
     for (let i = 0; i < readyDisciples.length; i++) {
@@ -865,7 +884,8 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'rows <số hàng>' hoặc 'hang <n>'\x1b[0m: Ngồi theo hàng nghe thuyết pháp (VD: rows 4)");
   console.log("  • \x1b[1;33mGõ 'ngang' / 'doc' + Enter\x1b[0m  : Chuyển đổi giữa Hàng Ngang ↔ Hàng Dọc");
   console.log("  • \x1b[1;33mGõ 'front' / 'behind'\x1b[0m       : Ngồi trước mặt đối diện hoặc sau lưng sư phụ");
-  console.log("  • \x1b[1;33mGõ 'greet <câu chào>' + Enter\x1b[0m: Cho các đệ tử chắp tay hô chào sếp/đạo hữu");
+  console.log("  • \x1b[1;33mGõ 'greet <câu>' hoặc 'chao'\x1b[0m: Cho các đệ tử chắp tay hô chào");
+  console.log("  • \x1b[1;33mGõ 'kemten' hoặc 'tagname'\x1b[0m   : Bật/tắt kèm tên người theo dõi khi chat");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
@@ -1004,6 +1024,9 @@ rl.on("line", (line) => {
     const parts = line.trim().split(/\s+/);
     const custom = parts.slice(1).join(" ").trim();
     shoutGreeting(custom);
+  } else if (cmd === "tagname" || cmd === "kemten" || cmd === "greetname") {
+    greetIncludeName = !greetIncludeName;
+    console.log(`\x1b[35m[KÈM TÊN CHAT] Đã ${greetIncludeName ? "BẬT (kèm tên người theo dõi)" : "TẮT (chỉ chat nội dung bạn nhập)"}!\x1b[0m`);
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
