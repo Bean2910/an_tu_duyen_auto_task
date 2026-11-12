@@ -51,7 +51,43 @@ let targetRoom = getArg("room", "chua-1");
 let customName = getArg("name", "");
 let autoBow = args.includes("--auto");
 let airWalk = args.includes("--air") || args.includes("--fly");
+let followPlayer = args.includes("--follow") || args.includes("--f");
 const SERVER_URL = "wss://didenchua.online/ws";
+
+// Quản lý danh sách người chơi khác trong phòng để đệ tử bám theo
+const roomOtherPlayers = new Map();
+
+function isOurDisciple(id, name) {
+  if (!id && !name) return false;
+  if (disciples.some((d) => d.myId === id)) return true;
+  if (name) {
+    const base = (customName || "").trim();
+    if (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #")) return true;
+    if (base && name.startsWith(base)) return true;
+  }
+  return false;
+}
+
+function registerOrUpdatePeer(peer) {
+  if (!peer || !peer.id) return;
+  if (isOurDisciple(peer.id, peer.name)) return;
+  const existing = roomOtherPlayers.get(peer.id) || {};
+  roomOtherPlayers.set(peer.id, {
+    id: peer.id,
+    name: peer.name || existing.name || `Đạo hữu #${peer.id.slice(0, 4)}`,
+    x: typeof peer.x === "number" ? peer.x : (existing.x || 0),
+    y: typeof peer.y === "number" ? peer.y : (existing.y || 0),
+    z: typeof peer.z === "number" ? peer.z : (existing.z || 0),
+    ry: typeof peer.ry === "number" ? peer.ry : (existing.ry || 0),
+    s: typeof peer.s === "number" ? peer.s : (existing.s || 0),
+    lastUpdate: Date.now()
+  });
+}
+
+function removePeer(id) {
+  if (!id) return;
+  roomOtherPlayers.delete(id);
+}
 
 // Tính toán độ cao mặt đất chính xác theo bản đồ chùa để không bị đi trên không
 function getGroundY(x, z) {
@@ -166,9 +202,35 @@ class Disciple {
           this.myPid = msg.pid;
           this.ready = true;
           this.log(`Đã vào phòng [${this.room}] thành công! ID: ${this.myId}`, "\x1b[32m");
-          this.enterChanhDien();
+          if (Array.isArray(msg.peers)) msg.peers.forEach(registerOrUpdatePeer);
+          if (formationMode !== "roam") {
+            this.enterChanhDien();
+          }
         } else if (msg.t === "room") {
           this.room = msg.room;
+          if (Array.isArray(msg.peers)) msg.peers.forEach(registerOrUpdatePeer);
+        } else if (msg.t === "join" && msg.peer) {
+          registerOrUpdatePeer(msg.peer);
+        } else if (msg.t === "leave" && msg.id) {
+          removePeer(msg.id);
+        } else if (msg.t === "state" && msg.id) {
+          const p = roomOtherPlayers.get(msg.id);
+          if (p) {
+            if (typeof msg.x === "number") p.x = msg.x;
+            if (typeof msg.y === "number") p.y = msg.y;
+            if (typeof msg.z === "number") p.z = msg.z;
+            if (typeof msg.ry === "number") p.ry = msg.ry;
+            if (typeof msg.s === "number") p.s = msg.s;
+            p.lastUpdate = Date.now();
+          }
+        } else if (msg.t === "states" && Array.isArray(msg.a)) {
+          for (const [id, x, y, z, ry, s] of msg.a) {
+            const p = roomOtherPlayers.get(id);
+            if (p) {
+              p.x = x; p.y = y; p.z = z; p.ry = ry; p.s = s;
+              p.lastUpdate = Date.now();
+            }
+          }
         }
       } catch { }
     };
@@ -402,6 +464,86 @@ function startRoaming() {
         };
       }
 
+      // BÁM THEO NGƯỜI CHƠI KHÁC TRONG CHÙA (NẾU BẬT)
+      let targetPlayer = null;
+      if (followPlayer) {
+        const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+        if (players.length > 0) {
+          const assignedIdx = (d.index - 1) % players.length;
+          targetPlayer = players[assignedIdx];
+        }
+      }
+
+      if (targetPlayer) {
+        const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+        const coFollowers = disciples.filter((otherD) => {
+          if (!otherD.ready) return false;
+          return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
+        });
+        const localSlot = Math.max(0, coFollowers.indexOf(d));
+
+        const row = Math.floor(localSlot / 3);
+        const col = (localSlot % 3) - 1;
+        const baseFollowDist = 1.8 + row * 1.0;
+        const lateralSpread = col * 1.1;
+
+        const playerRy = targetPlayer.ry || 0;
+        const behindAngle = playerRy + Math.PI;
+
+        const slotX = targetPlayer.x + Math.sin(behindAngle) * baseFollowDist + Math.cos(behindAngle) * lateralSpread;
+        const slotZ = targetPlayer.z + Math.cos(behindAngle) * baseFollowDist - Math.sin(behindAngle) * lateralSpread;
+
+        const dx = slotX - d.pos.x;
+        const dz = slotZ - d.pos.z;
+        const distToSlot = Math.hypot(dx, dz);
+        const distToPlayer = Math.hypot(targetPlayer.x - d.pos.x, targetPlayer.z - d.pos.z);
+
+        let currentSpeed = d.baseSpeed || 0.28;
+        if (distToPlayer > 8.0) {
+          currentSpeed = Math.min(0.60, currentSpeed * 1.8);
+        } else if (distToPlayer > 4.5) {
+          currentSpeed = Math.min(0.45, currentSpeed * 1.4);
+        }
+
+        if (distToSlot > 0.5) {
+          const step = Math.min(currentSpeed, distToSlot);
+          d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * step) * 100) / 100;
+          d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * step) * 100) / 100;
+          d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+          const moveGroundY = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
+          d.lastStateSend = now;
+
+          d.send({
+            t: "state",
+            x: d.pos.x,
+            y: d.pos.y,
+            z: d.pos.z,
+            ry: d.pos.ry,
+            s: 1
+          });
+          return;
+        } else {
+          d.pos.ry = Math.round(playerRy * 100) / 100;
+          const moveGroundY = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
+
+          if (!d.lastStateSend || now - d.lastStateSend > 2000) {
+            d.lastStateSend = now;
+            const followState = (targetPlayer.s === 2) ? 2 : 0;
+            d.send({
+              t: "state",
+              x: d.pos.x,
+              y: d.pos.y,
+              z: d.pos.z,
+              ry: d.pos.ry,
+              s: followState
+            });
+          }
+          return;
+        }
+      }
+
       // Nghỉ chân tại chỗ: chỉ gửi keepalive mỗi 2.5s để tiết kiệm đường truyền
       if (d.idleTimer > 0) {
         d.idleTimer--;
@@ -553,6 +695,7 @@ function printHeader() {
   console.log(`\x1b[32m▶ Tên đệ tử      :\x1b[0m ${customName || "Đệ tử ngầm (mặc định)"}`);
   console.log(`\x1b[32m▶ Phòng chùa     :\x1b[0m ${targetRoom}`);
   console.log(`\x1b[32m▶ Đi trên không  :\x1b[0m ${airWalk ? "BẬT (Khinh công lướt mây)" : "TẮT (Đi bộ tiếp đất)"}`);
+  console.log(`\x1b[32m▶ Bám theo người :\x1b[0m ${followPlayer ? "BẬT (Tự động đi theo người chơi khác)" : "TẮT (Đi dạo tự do)"}`);
   console.log(`\x1b[32m▶ Tự động lạy    :\x1b[0m ${autoBow ? "BẬT (Mỗi 7.5s)" : "TẮT (Nhấn Space / Enter để lạy)"}`);
   console.log(`\x1b[32m▶ Tài nguyên     :\x1b[0m 0% GPU, < 15MB RAM, 0 tab trình duyệt`);
   console.log("\x1b[1;36m------------------------------------------------------------------------\x1b[0m");
@@ -561,6 +704,7 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'roam' + Enter\x1b[0m         : Cho đệ tử tản ra đi dạo tự do khắp bản đồ chùa");
   console.log("  • \x1b[1;33mGõ 'hall' + Enter\x1b[0m         : Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng");
   console.log("  • \x1b[1;33mGõ 'air' hoặc 'fly' + Enter\x1b[0m : Bật/tắt chế độ Đi trên không (Khinh công)");
+  console.log("  • \x1b[1;33mGõ 'follow' hoặc 'f' + Enter\x1b[0m: Bật/tắt chế độ Tự đi theo người chơi khác");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
@@ -645,6 +789,12 @@ rl.on("line", (line) => {
         });
       }
     });
+  } else if (cmd === "follow" || cmd === "f" || cmd === "bamtheo") {
+    followPlayer = !followPlayer;
+    console.log(`\x1b[36m[BÁM THEO] Đã ${followPlayer ? "BẬT (tự động chia đều bám theo người chơi khác)" : "TẮT (trở về đi dạo tự do)"} chế độ Đi theo người chơi khác!\x1b[0m`);
+    if (followPlayer && formationMode !== "roam") {
+      startRoaming();
+    }
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();

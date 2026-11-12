@@ -1445,6 +1445,38 @@
 .atd-airwalk-label:hover {
   color: #fff;
 }
+.atd-follow-box {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px dashed rgba(56, 189, 248, 0.45);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0 2px 0;
+  transition: all 0.2s ease;
+}
+.atd-follow-box:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.7);
+}
+.atd-follow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #bae6fd;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+.atd-follow-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #0284c7;
+  margin: 0;
+  width: 13px;
+  height: 13px;
+}
+.atd-follow-label:hover {
+  color: #fff;
+}
 .atd-scale-info {
   font-size: 11px;
   line-height: 1.45;

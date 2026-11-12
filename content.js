@@ -328,6 +328,76 @@
     { name: "Trước Chánh điện (Hiên)", zone: "Chánh điện", x: 0, z: 8, radius: 8 }
   ];
 
+  // --- THEO DÕI CÁC ĐẠO HỮU / NGƯỜI CHƠI KHÁC TRONG CHÙA (ĐỂ ĐỆ TỬ BÁM THEO) ---
+  const roomOtherPlayers = new Map(); // id -> { id, name, x, y, z, ry, s, lastUpdate }
+  let mainPlayerId = null;
+
+  function isOurDisciple(id, name) {
+    if (!id && !name) return false;
+    if (mainPlayerId && id === mainPlayerId) return true;
+    if (typeof headlessDisciples !== "undefined") {
+      if (headlessDisciples.disciples.some((d) => d.myId === id)) return true;
+      if (name) {
+        const base = (headlessDisciples.customName || "").trim();
+        if (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #")) return true;
+        if (base && name.startsWith(base)) return true;
+      }
+    }
+    if (name && (name.startsWith("Đệ tử #") || name.startsWith("Đệ tử ngầm"))) return true;
+    return false;
+  }
+
+  function registerOrUpdatePeer(peer) {
+    if (!peer || !peer.id) return;
+    if (isOurDisciple(peer.id, peer.name)) return;
+    const existing = roomOtherPlayers.get(peer.id) || {};
+    roomOtherPlayers.set(peer.id, {
+      id: peer.id,
+      name: peer.name || existing.name || `Đạo hữu #${peer.id.slice(0, 4)}`,
+      x: typeof peer.x === "number" ? peer.x : (existing.x || 0),
+      y: typeof peer.y === "number" ? peer.y : (existing.y || 0),
+      z: typeof peer.z === "number" ? peer.z : (existing.z || 0),
+      ry: typeof peer.ry === "number" ? peer.ry : (existing.ry || 0),
+      s: typeof peer.s === "number" ? peer.s : (existing.s || 0),
+      lastUpdate: Date.now()
+    });
+    updateFollowTargetDropdownUI();
+  }
+
+  function removePeer(id) {
+    if (!id) return;
+    roomOtherPlayers.delete(id);
+    updateFollowTargetDropdownUI();
+  }
+
+  function updateFollowTargetDropdownUI() {
+    const sel = document.getElementById("atd-select-follow-target");
+    const hint = document.getElementById("atd-follow-player-hint");
+    if (!sel) return;
+
+    const currentVal = sel.value || (typeof headlessDisciples !== "undefined" ? headlessDisciples.followTargetId : "auto");
+    const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+
+    sel.innerHTML = '<option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>';
+    players.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `👤 ${p.name || "Đạo hữu"} (${p.id.slice(0, 5)})`;
+      if (opt.value === currentVal) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    if (hint) {
+      if (players.length === 0) {
+        hint.textContent = "Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do";
+        hint.style.color = "#f59e0b";
+      } else {
+        hint.textContent = `Đang có ${players.length} đạo hữu trong chùa · Đệ tử sẽ bám sát theo sau`;
+        hint.style.color = "#34d399";
+      }
+    }
+  }
+
   // --- QUẢN LÝ ĐỆ TỬ NGẦM (HEADLESS DISCIPLES) CHẠY NGAY TRONG TAB CHÍNH (0 TAB - 0% GPU) ---
   class HeadlessDiscipleManager {
     constructor() {
@@ -338,6 +408,8 @@
       this.customName = (localStorage.getItem("atd_headless_name") || "").trim();
       this.autoNumber = localStorage.getItem("atd_headless_autonumber") !== "false";
       this.airWalk = localStorage.getItem("atd_headless_airwalk") === "true";
+      this.followPlayer = localStorage.getItem("atd_headless_follow_player") === "true";
+      this.followTargetId = localStorage.getItem("atd_headless_follow_target") || "auto";
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
@@ -387,6 +459,24 @@
           } catch {}
         }
       });
+      this.updateUI();
+    }
+
+    setFollowPlayer(enabled) {
+      this.followPlayer = !!enabled;
+      localStorage.setItem("atd_headless_follow_player", this.followPlayer ? "true" : "false");
+      log(this.followPlayer ? "🚶 [BÁM THEO] Đã bật chế độ Tự động đi theo người chơi khác trong chùa!" : "🏃 Đã tắt bám theo: Đệ tử trở về đi dạo tự do.", "info");
+      if (this.followPlayer && this.formationMode === "hall") {
+        this.startRoaming(true);
+      }
+      this.updateUI();
+    }
+
+    setFollowTarget(targetId) {
+      this.followTargetId = targetId || "auto";
+      localStorage.setItem("atd_headless_follow_target", this.followTargetId);
+      const targetName = (this.followTargetId === "auto") ? "Tất cả đạo hữu" : (roomOtherPlayers.get(this.followTargetId)?.name || this.followTargetId);
+      log(`🎯 Đã chọn mục tiêu bám theo: ${targetName}`, "info");
       this.updateUI();
     }
 
@@ -576,10 +666,38 @@
               this.sendToHall(disciple);
               log(`⚡ [${disciple.name}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
             }
+            if (Array.isArray(msg.peers)) {
+              msg.peers.forEach(registerOrUpdatePeer);
+            }
             this.updateUI();
             updateSwarmInfoUI();
           } else if (msg.t === "room") {
             disciple.room = msg.room;
+            if (Array.isArray(msg.peers)) {
+              msg.peers.forEach(registerOrUpdatePeer);
+            }
+          } else if (msg.t === "join" && msg.peer) {
+            registerOrUpdatePeer(msg.peer);
+          } else if (msg.t === "leave" && msg.id) {
+            removePeer(msg.id);
+          } else if (msg.t === "state" && msg.id) {
+            const p = roomOtherPlayers.get(msg.id);
+            if (p) {
+              if (typeof msg.x === "number") p.x = msg.x;
+              if (typeof msg.y === "number") p.y = msg.y;
+              if (typeof msg.z === "number") p.z = msg.z;
+              if (typeof msg.ry === "number") p.ry = msg.ry;
+              if (typeof msg.s === "number") p.s = msg.s;
+              p.lastUpdate = Date.now();
+            }
+          } else if (msg.t === "states" && Array.isArray(msg.a)) {
+            for (const [id, x, y, z, ry, s] of msg.a) {
+              const p = roomOtherPlayers.get(id);
+              if (p) {
+                p.x = x; p.y = y; p.z = z; p.ry = ry; p.s = s;
+                p.lastUpdate = Date.now();
+              }
+            }
           }
         } catch {}
       };
@@ -794,6 +912,97 @@
           };
         }
 
+        // BÁM THEO NGƯỜI CHƠI KHÁC TRONG CHÙA (NẾU BẬT)
+        let targetPlayer = null;
+        if (this.followPlayer) {
+          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+          if (players.length > 0) {
+            if (this.followTargetId && this.followTargetId !== "auto") {
+              targetPlayer = players.find((p) => p.id === this.followTargetId);
+            }
+            if (!targetPlayer) {
+              const assignedIdx = (d.index - 1) % players.length;
+              targetPlayer = players[assignedIdx];
+            }
+          }
+        }
+
+        if (targetPlayer) {
+          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+          const coFollowers = this.disciples.filter((otherD) => {
+            if (!otherD.ready) return false;
+            if (this.followTargetId && this.followTargetId !== "auto") return true;
+            return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
+          });
+          const localSlot = Math.max(0, coFollowers.indexOf(d));
+
+          // Đội hình hộ tống hình cánh cung sau lưng người chơi:
+          const row = Math.floor(localSlot / 3);
+          const col = (localSlot % 3) - 1; // -1 (trái), 0 (giữa), 1 (phải)
+          const baseFollowDist = 1.8 + row * 1.0;
+          const lateralSpread = col * 1.1;
+
+          const playerRy = targetPlayer.ry || 0;
+          const behindAngle = playerRy + Math.PI;
+
+          const slotX = targetPlayer.x + Math.sin(behindAngle) * baseFollowDist + Math.cos(behindAngle) * lateralSpread;
+          const slotZ = targetPlayer.z + Math.cos(behindAngle) * baseFollowDist - Math.sin(behindAngle) * lateralSpread;
+
+          const dx = slotX - d.pos.x;
+          const dz = slotZ - d.pos.z;
+          const distToSlot = Math.hypot(dx, dz);
+          const distToPlayer = Math.hypot(targetPlayer.x - d.pos.x, targetPlayer.z - d.pos.z);
+
+          let currentSpeed = d.baseSpeed || 0.28;
+          if (distToPlayer > 8.0) {
+            currentSpeed = Math.min(0.60, currentSpeed * 1.8);
+          } else if (distToPlayer > 4.5) {
+            currentSpeed = Math.min(0.45, currentSpeed * 1.4);
+          }
+
+          if (distToSlot > 0.5) {
+            const step = Math.min(currentSpeed, distToSlot);
+            d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * step) * 100) / 100;
+            d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * step) * 100) / 100;
+            d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+            const moveGroundY = getGroundY(d.pos.x, d.pos.z);
+            d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
+            d.lastStateSend = now;
+
+            try {
+              d.ws.send(JSON.stringify({
+                t: "state",
+                x: d.pos.x,
+                y: d.pos.y,
+                z: d.pos.z,
+                ry: d.pos.ry,
+                s: 1
+              }));
+            } catch {}
+            return;
+          } else {
+            d.pos.ry = Math.round(playerRy * 100) / 100;
+            const moveGroundY = getGroundY(d.pos.x, d.pos.z);
+            d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
+
+            if (!d.lastStateSend || now - d.lastStateSend >= 2000) {
+              d.lastStateSend = now;
+              const followState = (targetPlayer.s === 2) ? 2 : 0;
+              try {
+                d.ws.send(JSON.stringify({
+                  t: "state",
+                  x: d.pos.x,
+                  y: d.pos.y,
+                  z: d.pos.z,
+                  ry: d.pos.ry,
+                  s: followState
+                }));
+              } catch {}
+            }
+            return;
+          }
+        }
+
         // Đang dừng chân nghỉ ngơi hoặc ngồi thiền
         if (d.idleTimer > 0) {
           d.idleTimer--;
@@ -992,15 +1201,24 @@
       if (btnHall) btnHall.classList.toggle("active", this.formationMode === "hall");
       if (btnRoam) btnRoam.classList.toggle("active", this.formationMode === "roam");
       if (modeBadge) {
-        let text = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : "🏃 Đi dạo tự do khắp chùa";
+        let text = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : (this.followPlayer ? "🚶 Bám theo đạo hữu" : "🏃 Đi dạo tự do khắp chùa");
         if (this.airWalk) text += " · ☁️ Khinh công";
         modeBadge.textContent = text;
-        modeBadge.style.color = this.airWalk ? "#c084fc" : (this.formationMode === "hall" ? "#e5bc72" : "#38bdf8");
+        modeBadge.style.color = this.airWalk ? "#c084fc" : (this.formationMode === "hall" ? "#e5bc72" : (this.followPlayer ? "#38bdf8" : "#34d399"));
       }
       const chkAirWalk = $("#atd-chk-airwalk");
       if (chkAirWalk) {
         chkAirWalk.checked = this.airWalk;
       }
+      const chkFollow = $("#atd-chk-follow-player");
+      if (chkFollow) {
+        chkFollow.checked = this.followPlayer;
+      }
+      const followWrap = $("#atd-follow-target-wrap");
+      if (followWrap) {
+        followWrap.style.display = this.followPlayer ? "block" : "none";
+      }
+      updateFollowTargetDropdownUI();
 
       if (input && document.activeElement !== input) {
         input.value = this.targetCount;
@@ -2137,6 +2355,51 @@
               if (typeof event.data === "string") {
                 const msg = JSON.parse(event.data);
                 syncServerMessage(msg);
+
+                // Cập nhật danh sách người chơi khác trong chùa (để đệ tử bám theo)
+                if (msg.t === "welcome") {
+                  if (msg.id) mainPlayerId = msg.id;
+                  roomOtherPlayers.clear();
+                  if (Array.isArray(msg.peers)) {
+                    msg.peers.forEach(registerOrUpdatePeer);
+                  }
+                } else if (msg.t === "room") {
+                  roomOtherPlayers.clear();
+                  if (Array.isArray(msg.peers)) {
+                    msg.peers.forEach(registerOrUpdatePeer);
+                  }
+                } else if (msg.t === "join" && msg.peer) {
+                  registerOrUpdatePeer(msg.peer);
+                } else if (msg.t === "leave" && msg.id) {
+                  removePeer(msg.id);
+                } else if (msg.t === "state" && msg.id) {
+                  const p = roomOtherPlayers.get(msg.id);
+                  if (p) {
+                    if (typeof msg.x === "number") p.x = msg.x;
+                    if (typeof msg.y === "number") p.y = msg.y;
+                    if (typeof msg.z === "number") p.z = msg.z;
+                    if (typeof msg.ry === "number") p.ry = msg.ry;
+                    if (typeof msg.s === "number") p.s = msg.s;
+                    p.lastUpdate = Date.now();
+                  }
+                } else if (msg.t === "states" && Array.isArray(msg.a)) {
+                  for (const [id, x, y, z, ry, s] of msg.a) {
+                    const p = roomOtherPlayers.get(id);
+                    if (p) {
+                      p.x = x; p.y = y; p.z = z; p.ry = ry; p.s = s;
+                      p.lastUpdate = Date.now();
+                    }
+                  }
+                } else if (msg.t === "near") {
+                  if (Array.isArray(msg.add)) msg.add.forEach(registerOrUpdatePeer);
+                  if (Array.isArray(msg.drop)) msg.drop.forEach(removePeer);
+                } else if (msg.t === "look" && msg.peer && msg.peer.id) {
+                  const p = roomOtherPlayers.get(msg.peer.id);
+                  if (p && msg.peer.name) {
+                    p.name = msg.peer.name;
+                    updateFollowTargetDropdownUI();
+                  }
+                }
 
                 // Lưu câu hỏi Đố vui Phật pháp từ gói { t: "quiz-practice", qs }
                 if (msg.t === "quiz-practice" && Array.isArray(msg.qs)) {
@@ -4966,6 +5229,20 @@
                 <span>☁️ <b>Đi trên không</b> (Khinh công lướt mây)</span>
               </label>
             </div>
+            <!-- Chức năng Tự động đi theo người chơi khác trong chùa -->
+            <div class="atd-follow-box">
+              <label class="atd-follow-label" title="Bật để đệ tử tự động bám theo sau lưng người chơi / đạo hữu khác đang có mặt trong chùa">
+                <input type="checkbox" id="atd-chk-follow-player" />
+                <span>🚶 <b>Tự đi theo người chơi khác</b> trong chùa</span>
+              </label>
+              <div id="atd-follow-target-wrap" style="display:none; margin-top:6px; padding-left:18px;">
+                <div style="font-size:11px; color:#cbd5e1; margin-bottom:3px;">Mục tiêu theo sau:</div>
+                <select id="atd-select-follow-target" style="width:100%; padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.85); color:#f8fafc; border:1px solid rgba(56,189,248,0.3); border-radius:5px; outline:none;">
+                  <option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>
+                </select>
+                <div id="atd-follow-player-hint" style="font-size:10.5px; color:#94a3b8; margin-top:3px; font-style:italic;">Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do</div>
+              </div>
+            </div>
             <div class="atd-clone-btns" style="margin-top:4px;">
               <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
                 🙏 Phát động Lạy (Đệ tử trước)
@@ -5233,6 +5510,22 @@
       chkAirWalk.checked = headlessDisciples.airWalk;
       chkAirWalk.addEventListener("change", () => {
         headlessDisciples.setAirWalk(chkAirWalk.checked);
+      });
+    }
+
+    const chkFollow = $("#atd-chk-follow-player", panel);
+    if (chkFollow) {
+      chkFollow.checked = headlessDisciples.followPlayer;
+      chkFollow.addEventListener("change", () => {
+        headlessDisciples.setFollowPlayer(chkFollow.checked);
+      });
+    }
+
+    const selFollow = $("#atd-select-follow-target", panel);
+    if (selFollow) {
+      selFollow.value = headlessDisciples.followTargetId || "auto";
+      selFollow.addEventListener("change", () => {
+        headlessDisciples.setFollowTarget(selFollow.value);
       });
     }
 
