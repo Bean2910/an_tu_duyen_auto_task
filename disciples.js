@@ -91,9 +91,10 @@ function getHallOffset(index) {
   const row = Math.floor((index - 1) / 6);
   const col = (index - 1) % 6;
   const xPositions = [-3.0, -1.8, -0.6, 0.6, 1.8, 3.0];
+  const rowStagger = (row % 2 === 1) ? 0.6 : 0;
   return {
-    x: xPositions[col] != null ? xPositions[col] : 0,
-    z: -2.6 - (row * 0.85)
+    x: (xPositions[col] != null ? xPositions[col] : 0) + rowStagger,
+    z: -2.6 - (row * 0.95)
   };
 }
 
@@ -199,7 +200,10 @@ class Disciple {
 
   enterChanhDien() {
     this.send({ t: "visit", zone: "Chánh điện" });
-    const y = Math.round((2.4 + (airWalk ? 3.0 : 0)) * 100) / 100;
+    const row = Math.floor((this.index - 1) / 6);
+    const col = (this.index - 1) % 6;
+    const airAlt = airWalk ? (2.0 + (row * 0.7) + ((col % 3) * 0.25)) : 0;
+    const y = Math.round((2.4 + airAlt) * 100) / 100;
     this.send({
       t: "state",
       x: this.offset.x,
@@ -285,30 +289,41 @@ function startRoaming() {
   formationMode = "roam";
   console.log("\x1b[36m[HÀNH TUNG] Đã kích hoạt Chế độ Đi dạo: Đệ tử tản ra đi lại tự do khắp bản đồ chùa!\x1b[0m");
 
-  const alt = airWalk ? 3.2 : 0;
   disciples.forEach((d, idx) => {
-    d.idleTimer = 0;
+    // Chênh lệch thời gian xuất phát (0 - 5s)
+    d.idleTimer = (idx * 6) % 25;
     d.lastStateSend = 0;
-    const lm = MAP_LANDMARKS[(idx + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
-    const angle = Math.random() * Math.PI * 2;
-    const radius = Math.random() * lm.radius;
+    // Tốc độ cá nhân hóa riêng biệt (từ 0.23m đến 0.41m / 200ms) để không đi ngang hàng nhau
+    d.baseSpeed = 0.23 + ((idx * 7) % 10) * 0.02;
+    // Phân tầng độ cao khi khinh công (từ 2.0m đến 5.2m)
+    d.flyTier = 2.0 + ((idx * 11) % 7) * 0.5;
+
+    // Phân tán rải rác các mục tiêu khác nhau
+    const lm = MAP_LANDMARKS[(idx * 3 + Math.floor(Math.random() * 3)) % MAP_LANDMARKS.length];
+    const angle = (idx * 1.35) + Math.random() * Math.PI;
+    const radius = 2.0 + Math.random() * Math.max(2, lm.radius - 2);
     d.targetWaypoint = {
       x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
       z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
       zone: lm.zone
     };
-    if (!d.pos) {
-      d.pos = { x: d.offset.x, y: Math.round((2.4 + alt) * 100) / 100, z: d.offset.z, ry: Math.PI };
-    }
   });
 
   if (roamTimer) clearInterval(roamTimer);
   roamTimer = setInterval(() => {
     if (formationMode !== "roam") return;
     const now = Date.now();
-    const altitude = airWalk ? 3.2 : 0;
     disciples.forEach((d) => {
       if (!d.ready || !d.ws) return;
+
+      // Phân tầng độ cao khi khinh công kèm lượn sóng nhẹ
+      let altitude = 0;
+      if (airWalk) {
+        const tier = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
+        const bob = Math.sin((now / 1400) + d.index * 1.5) * 0.25;
+        altitude = tier + bob;
+      }
+
       if (!d.pos) d.pos = { x: d.offset.x, y: Math.round((2.4 + altitude) * 100) / 100, z: d.offset.z, ry: Math.PI };
 
       // Nghỉ chân tại chỗ: chỉ gửi keepalive mỗi 2.5s để tiết kiệm đường truyền
@@ -329,11 +344,11 @@ function startRoaming() {
         return;
       }
 
-      // Chọn địa danh mới nếu chưa có
+      // Chọn địa danh mới nếu chưa có (rải rác các khu)
       if (!d.targetWaypoint) {
-        const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
+        const lm = MAP_LANDMARKS[(d.index * 3 + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
         const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * lm.radius;
+        const radius = 2.0 + Math.random() * Math.max(2, lm.radius - 2);
         d.targetWaypoint = {
           x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
           z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
@@ -345,9 +360,9 @@ function startRoaming() {
       const dz = d.targetWaypoint.z - d.pos.z;
       const dist = Math.hypot(dx, dz);
 
-      // Đã tới điểm đến: nghỉ chân 3 - 6 giây (15 - 30 nhịp @ 200ms)
+      // Đã tới điểm đến: nghỉ chân chênh lệch nhau từ 2s đến 7s
       if (dist < 1.5) {
-        d.idleTimer = Math.floor(Math.random() * 16) + 15;
+        d.idleTimer = 10 + Math.floor(Math.random() * 15) + ((d.index * 5) % 10);
         d.targetWaypoint = null;
         d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
         d.lastStateSend = now;
@@ -362,8 +377,9 @@ function startRoaming() {
         return;
       }
 
-      // Bước đi mượt mà tự nhiên: ~0.32m mỗi nhịp 200ms (= 1.6 m/s, chuẩn tốc độ đi của chú tiểu)
-      const stepDist = 0.32;
+      // Tốc độ cá nhân hóa riêng biệt để không bao giờ đi ngang hàng nhau
+      const baseSpeed = d.baseSpeed || (0.23 + ((d.index * 7) % 10) * 0.02);
+      const stepDist = baseSpeed + (Math.sin(now / 1200 + d.index) * 0.02);
       const moveX = (dx / dist) * Math.min(stepDist, dist);
       const moveZ = (dz / dist) * Math.min(stepDist, dist);
       d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
@@ -396,11 +412,9 @@ function recallToHall() {
   if (roamTimer) clearInterval(roamTimer);
   roamTimer = null;
   console.log("\x1b[32m[TRIỆU TẬP] Đã gom toàn bộ đệ tử về Chánh điện xếp hàng bồ đoàn trang nghiêm!\x1b[0m");
-  const hallY = Math.round((2.4 + (airWalk ? 3.0 : 0)) * 100) / 100;
   disciples.forEach((d) => {
     d.idleTimer = 0;
     d.targetWaypoint = null;
-    d.pos = { x: d.offset.x, y: hallY, z: d.offset.z, ry: Math.PI };
     d.enterChanhDien();
   });
 }
@@ -516,12 +530,21 @@ rl.on("line", (line) => {
     console.log(`\x1b[32m[ĐỔI TÊN] Đã cập nhật tên đệ tử thành: ${customName || "Đệ tử ngầm (mặc định)"}\x1b[0m`);
   } else if (cmd === "air" || cmd === "fly" || cmd === "khinhcong") {
     airWalk = !airWalk;
-    const alt = airWalk ? 3.2 : 0;
-    console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (bay lượn lơ lửng trên mây)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
+    console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (phân tầng chênh lệch độ cao)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
     disciples.forEach((d) => {
       if (d.pos) {
+        let altitude = 0;
+        if (airWalk) {
+          if (formationMode === "hall") {
+            const row = Math.floor((d.index - 1) / 6);
+            const col = (d.index - 1) % 6;
+            altitude = 2.0 + (row * 0.7) + ((col % 3) * 0.25);
+          } else {
+            altitude = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
+          }
+        }
         const baseY = (formationMode === "hall") ? 2.4 : getGroundY(d.pos.x, d.pos.z);
-        d.pos.y = Math.round((baseY + alt) * 100) / 100;
+        d.pos.y = Math.round((baseY + altitude) * 100) / 100;
         d.send({
           t: "state",
           x: d.pos.x,

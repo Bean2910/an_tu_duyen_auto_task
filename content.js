@@ -349,12 +349,21 @@
     setAirWalk(enabled) {
       this.airWalk = !!enabled;
       localStorage.setItem("atd_headless_airwalk", this.airWalk ? "true" : "false");
-      const altitude = this.airWalk ? 3.2 : 0;
-      log(this.airWalk ? "☁️ [KHINH CÔNG] Đã bật chế độ Đi trên không (lướt mây bay lượn)!" : "🌍 Đã hạ cánh: Đệ tử tiếp đất đi lại bình thường.", "info");
+      log(this.airWalk ? "☁️ [KHINH CÔNG] Đã bật chế độ Đi trên không (phân tầng chênh lệch độ cao)!" : "🌍 Đã hạ cánh: Đệ tử tiếp đất đi lại bình thường.", "info");
       this.disciples.forEach((d) => {
         if (d.ws && d.ws.readyState === WebSocket.OPEN) {
           if (!d.pos) {
             d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+          }
+          let altitude = 0;
+          if (this.airWalk) {
+            if (this.formationMode === "hall") {
+              const row = Math.floor((d.index - 1) / 8);
+              const col = (d.index - 1) % 8;
+              altitude = 2.0 + (row * 0.7) + ((col % 3) * 0.25);
+            } else {
+              altitude = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
+            }
           }
           const baseY = (this.formationMode === "hall") ? 2.4 : getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.round((baseY + altitude) * 100) / 100;
@@ -404,9 +413,11 @@
       const row = Math.floor((index - 1) / cols);
       const xStart = -4.2;
       const xSpacing = 1.2;
+      // So le hàng so le (staggered) dạng bàn cờ để không xếp thành hàng ngang tăm tắp
+      const rowStagger = (row % 2 === 1) ? 0.6 : 0;
       return {
-        x: Math.round((xStart + col * xSpacing) * 100) / 100,
-        z: Math.round((-2.6 - (row * 0.85)) * 100) / 100
+        x: Math.round((xStart + col * xSpacing + rowStagger) * 100) / 100,
+        z: Math.round((-2.6 - (row * 0.95)) * 100) / 100
       };
     }
 
@@ -571,7 +582,11 @@
 
     sendToHall(disciple) {
       if (disciple.ws && disciple.ws.readyState === WebSocket.OPEN) {
-        const y = Math.round((2.4 + (this.airWalk ? 3.0 : 0)) * 100) / 100;
+        const row = Math.floor((disciple.index - 1) / 8);
+        const col = (disciple.index - 1) % 8;
+        // Chênh lệch độ cao khi ở Chánh điện: hàng trước thấp (2.0m), hàng sau cao dần (lên tới 4.6m) như khán đài/bảo tháp
+        const airAlt = this.airWalk ? (2.0 + (row * 0.7) + ((col % 3) * 0.25)) : 0;
+        const y = Math.round((2.4 + airAlt) * 100) / 100;
         try {
           disciple.ws.send(JSON.stringify({ t: "visit", zone: "Chánh điện" }));
           disciple.ws.send(JSON.stringify({
@@ -620,11 +635,18 @@
       }
 
       this.disciples.forEach((d, idx) => {
-        d.idleTimer = Math.floor(Math.random() * 8); // Ngẫu nhiên nhịp bắt đầu để không bước cùng lúc
+        // Chênh lệch thời gian xuất phát (0 - 5s) để không ùa đi cùng một lúc
+        d.idleTimer = (idx * 6) % 25;
         d.lastStateSend = 0;
-        const lm = MAP_LANDMARKS[(idx + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * lm.radius;
+        // Tốc độ cá nhân hóa riêng biệt (từ 0.23m đến 0.41m / 200ms) để không đi ngang hàng nhau
+        d.baseSpeed = 0.23 + ((idx * 7) % 10) * 0.02;
+        // Phân tầng độ cao khi khinh công (từ 2.0m đến 5.2m)
+        d.flyTier = 2.0 + ((idx * 11) % 7) * 0.5;
+
+        // Phân tán rải rác các mục tiêu khác nhau
+        const lm = MAP_LANDMARKS[(idx * 3 + Math.floor(Math.random() * 3)) % MAP_LANDMARKS.length];
+        const angle = (idx * 1.35) + Math.random() * Math.PI;
+        const radius = 2.0 + Math.random() * Math.max(2, lm.radius - 2);
         d.targetWaypoint = {
           x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
           z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
@@ -644,9 +666,16 @@
 
     stepRoaming() {
       const now = Date.now();
-      const altitude = this.airWalk ? 3.2 : 0;
       this.disciples.forEach((d) => {
         if (!d.ready || !d.ws || d.ws.readyState !== WebSocket.OPEN) return;
+
+        // Tính toán độ cao riêng biệt: nếu đi trên không thì phân tầng chênh lệch độ cao kèm nhịp lượn sóng
+        let altitude = 0;
+        if (this.airWalk) {
+          const tier = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
+          const bob = Math.sin((now / 1400) + d.index * 1.5) * 0.25;
+          altitude = tier + bob;
+        }
 
         if (!d.pos) {
           d.pos = {
@@ -678,11 +707,11 @@
           return;
         }
 
-        // Nếu chưa có mục tiêu hoặc đã đến đích thì chọn địa danh mới
+        // Nếu chưa có mục tiêu hoặc đã đến đích thì chọn địa danh mới (rải rác các khu)
         if (!d.targetWaypoint) {
-          const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
+          const lm = MAP_LANDMARKS[(d.index * 3 + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
           const angle = Math.random() * Math.PI * 2;
-          const radius = Math.random() * lm.radius;
+          const radius = 2.0 + Math.random() * Math.max(2, lm.radius - 2);
           d.targetWaypoint = {
             x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
             z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
@@ -694,9 +723,9 @@
         const dz = d.targetWaypoint.z - d.pos.z;
         const dist = Math.hypot(dx, dz);
 
-        // Đã đến điểm đến: dừng chân nghỉ từ 3 đến 6 giây (15 - 30 nhịp @ 200ms)
+        // Đã đến điểm đến: dừng chân nghỉ ngẫu nhiên khác nhau giữa các đệ tử (2s đến 7s)
         if (dist < 1.5) {
-          d.idleTimer = Math.floor(Math.random() * 16) + 15;
+          d.idleTimer = 10 + Math.floor(Math.random() * 15) + ((d.index * 5) % 10);
           d.targetWaypoint = null;
           d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
           d.lastStateSend = now;
@@ -713,14 +742,15 @@
           return;
         }
 
-        // Bước đi cực mượt mà: ~0.32m mỗi nhịp 200ms (= 1.6 m/s, chuẩn tốc độ bước đi của chú tiểu)
-        const stepDist = 0.32;
+        // Bước đi cực mượt mà với TỐC ĐỘ RIÊNG BIỆT cho từng đệ tử để không bao giờ đi ngang hàng nhau
+        const baseSpeed = d.baseSpeed || (0.23 + ((d.index * 7) % 10) * 0.02);
+        const stepDist = baseSpeed + (Math.sin(now / 1200 + d.index) * 0.02);
         const moveX = (dx / dist) * Math.min(stepDist, dist);
         const moveZ = (dz / dist) * Math.min(stepDist, dist);
 
         d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
         d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
-        // Bám sát mặt đất hoặc bay trên không nếu bật khinh công
+        // Bám sát mặt đất hoặc bay trên không theo độ cao phân tầng riêng
         d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
         d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
         d.lastStateSend = now;
@@ -755,12 +785,9 @@
 
       log("🏛️ Đã triệu tập toàn bộ đệ tử về Chánh điện xếp hàng trang nghiêm!", "ok");
 
-      const hallY = Math.round((2.4 + (this.airWalk ? 3.0 : 0)) * 100) / 100;
       this.disciples.forEach((d) => {
         d.idleTimer = 0;
         d.targetWaypoint = null;
-        d.pos = { x: d.offset.x, y: hallY, z: d.offset.z, ry: Math.PI };
-        d.currentZone = "Chánh điện";
         this.sendToHall(d);
       });
 
