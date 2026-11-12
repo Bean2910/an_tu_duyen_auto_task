@@ -69,12 +69,13 @@ function isOurDisciple(id, name) {
 }
 
 function registerOrUpdatePeer(peer) {
-  if (!peer || !peer.id) return;
+  if (!peer || peer.id == null) return;
   if (isOurDisciple(peer.id, peer.name)) return;
+  const strId = String(peer.id);
   const existing = roomOtherPlayers.get(peer.id) || {};
   roomOtherPlayers.set(peer.id, {
     id: peer.id,
-    name: peer.name || existing.name || `Đạo hữu #${peer.id.slice(0, 4)}`,
+    name: peer.name || existing.name || `Đạo hữu #${strId.slice(0, 4)}`,
     x: typeof peer.x === "number" ? peer.x : (existing.x || 0),
     y: typeof peer.y === "number" ? peer.y : (existing.y || 0),
     z: typeof peer.z === "number" ? peer.z : (existing.z || 0),
@@ -85,8 +86,10 @@ function registerOrUpdatePeer(peer) {
 }
 
 function removePeer(id) {
-  if (!id) return;
+  if (id == null) return;
   roomOtherPlayers.delete(id);
+  roomOtherPlayers.delete(Number(id));
+  roomOtherPlayers.delete(String(id));
 }
 
 // Tính toán độ cao mặt đất chính xác theo bản đồ chùa để không bị đi trên không

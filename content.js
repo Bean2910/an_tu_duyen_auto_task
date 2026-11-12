@@ -348,12 +348,13 @@
   }
 
   function registerOrUpdatePeer(peer) {
-    if (!peer || !peer.id) return;
+    if (!peer || peer.id == null) return;
     if (isOurDisciple(peer.id, peer.name)) return;
+    const strId = String(peer.id);
     const existing = roomOtherPlayers.get(peer.id) || {};
     roomOtherPlayers.set(peer.id, {
       id: peer.id,
-      name: peer.name || existing.name || `Đạo hữu #${peer.id.slice(0, 4)}`,
+      name: peer.name || existing.name || `Đạo hữu #${strId.slice(0, 4)}`,
       x: typeof peer.x === "number" ? peer.x : (existing.x || 0),
       y: typeof peer.y === "number" ? peer.y : (existing.y || 0),
       z: typeof peer.z === "number" ? peer.z : (existing.z || 0),
@@ -365,8 +366,10 @@
   }
 
   function removePeer(id) {
-    if (!id) return;
+    if (id == null) return;
     roomOtherPlayers.delete(id);
+    roomOtherPlayers.delete(Number(id));
+    roomOtherPlayers.delete(String(id));
     updateFollowTargetDropdownUI();
   }
 
@@ -382,8 +385,9 @@
     players.forEach((p) => {
       const opt = document.createElement("option");
       opt.value = p.id;
-      opt.textContent = `👤 ${p.name || "Đạo hữu"} (${p.id.slice(0, 5)})`;
-      if (opt.value === currentVal) opt.selected = true;
+      const strId = String(p.id != null ? p.id : "");
+      opt.textContent = `👤 ${p.name || "Đạo hữu"} (${strId.slice(0, 5)})`;
+      if (String(opt.value) === String(currentVal)) opt.selected = true;
       sel.appendChild(opt);
     });
 
@@ -918,7 +922,7 @@
           const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
           if (players.length > 0) {
             if (this.followTargetId && this.followTargetId !== "auto") {
-              targetPlayer = players.find((p) => p.id === this.followTargetId);
+              targetPlayer = players.find((p) => String(p.id) === String(this.followTargetId));
             }
             if (!targetPlayer) {
               const assignedIdx = (d.index - 1) % players.length;
