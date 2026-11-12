@@ -51,22 +51,37 @@ let targetRoom = getArg("room", "chua-1");
 let autoBow = args.includes("--auto");
 const SERVER_URL = "wss://didenchua.online/ws";
 
+// Tính toán độ cao mặt đất chính xác theo bản đồ chùa để không bị đi trên không
+function getGroundY(x, z) {
+  if (x >= -21 && x <= 21 && z >= -31 && z <= 3) return 2.4;
+  if (x >= -21 && x <= 21 && z > 3 && z <= 4.8) return Math.round((2.4 - ((z - 3) / 1.8) * 0.6) * 100) / 100;
+  if (x >= -14 && x <= 14 && z >= -74 && z <= -46) return 4.6;
+  if (x >= -3.5 && x <= 3.5 && z > -46 && z <= -40) return Math.round((4.6 - ((z - (-46)) / 6.0) * 2.8) * 100) / 100;
+  if (x >= -30 && x <= 30 && z >= -46 && z <= 15) return 1.8;
+  if (x >= -6 && x <= 6 && z > 15 && z <= 21) return Math.round((1.8 - ((z - 15) / 6.0) * 1.8) * 100) / 100;
+  const distMound = Math.hypot(x - 46, z - (-52));
+  if (distMound < 15) return Math.round(Math.max(0, 6.0 * (1 - (distMound / 15) ** 2)) * 100) / 100;
+  if (x >= 33.6 && x <= 47.8 && Math.abs(z - 12) <= 1.5) {
+    const t = (x - 33.6) / (47.8 - 33.6);
+    return Math.round((Math.sin(t * Math.PI) * 0.7 + t * 1.0) * 100) / 100;
+  }
+  if (Math.abs(x - 50) <= 2.5 && Math.abs(z - 12) <= 2.5) return 1.0;
+  if (Math.abs(x) <= 4.5 && z >= 117 && z <= 157) return 0.3;
+  return 0.0;
+}
+
 // Tọa độ các địa danh trên bản đồ chùa để đệ tử đi dạo tự do
 const MAP_LANDMARKS = [
-  { name: "Sân chùa", zone: "Sân chùa", x: 0, y: 0, z: 40, radius: 14 },
-  { name: "Cổng tam quan", zone: "Cổng tam quan", x: 0, y: 0.3, z: 140, radius: 10 },
-  { name: "Đường thần đạo", zone: "Đường thần đạo", x: 0, y: 0.2, z: 90, radius: 8 },
-  { name: "Vườn hoa", zone: "Vườn hoa", x: 9.6, y: 0, z: 75.75, radius: 12 },
-  { name: "Bãi chăn trâu", zone: "Sân chùa", x: -21, y: 0, z: 111, radius: 10 },
-  { name: "Vườn Linh Thú", zone: "Vườn Linh Thú", x: -39, y: 0, z: 81, radius: 12 },
-  { name: "Hồ sen · Cầu Duyên", zone: "Hồ sen · Cầu Duyên", x: 35.5, y: 0, z: 12, radius: 8 },
-  { name: "Rùa thần", zone: "Hồ sen · Cầu Duyên", x: 34.8, y: 0, z: 21.5, radius: 6 },
-  { name: "Vườn thiền", zone: "Vườn thiền", x: -36, y: 0, z: 30, radius: 10 },
-  { name: "Pháp đường", zone: "Sân chùa", x: -40.5, y: 0, z: 4, radius: 8 },
-  { name: "Giếng Ngọc", zone: "Giếng Ngọc", x: -44, y: 0, z: -16, radius: 8 },
-  { name: "Tượng Di Lặc", zone: "Tượng Di Lặc", x: 46, y: 0, z: -32, radius: 10 },
-  { name: "Đền Nguyệt Lão", zone: "Hồ sen · Cầu Duyên", x: 50, y: 0, z: -12.5, radius: 8 },
-  { name: "Bảo tháp", zone: "Bảo tháp", x: 0, y: 4.6, z: -50, radius: 10 }
+  { name: "Sân chùa", zone: "Sân chùa", x: 0, z: 38, radius: 12 },
+  { name: "Đường thần đạo", zone: "Đường thần đạo", x: 0, z: 80, radius: 10 },
+  { name: "Cổng tam quan", zone: "Cổng tam quan", x: 0, z: 135, radius: 8 },
+  { name: "Vườn hoa", zone: "Vườn hoa", x: 12, z: 74, radius: 8 },
+  { name: "Bãi chăn trâu", zone: "Sân chùa", x: -20, z: 105, radius: 8 },
+  { name: "Vườn Linh Thú", zone: "Vườn Linh Thú", x: -42, z: 80, radius: 8 },
+  { name: "Hồ sen · Cầu Duyên", zone: "Hồ sen · Cầu Duyên", x: 35, z: 14, radius: 6 },
+  { name: "Vườn thiền", zone: "Vườn thiền", x: -34, z: 28, radius: 7 },
+  { name: "Pháp đường", zone: "Sân chùa", x: -38, z: 6, radius: 6 },
+  { name: "Trước Chánh điện (Hiên)", zone: "Chánh điện", x: 0, z: 8, radius: 8 }
 ];
 
 // Tọa độ đứng quỳ trong Chánh điện cho các đệ tử
@@ -259,38 +274,53 @@ function startRoaming() {
 
   disciples.forEach((d, idx) => {
     d.idleTimer = 0;
+    d.lastStateSend = 0;
     const lm = MAP_LANDMARKS[(idx + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.random() * lm.radius;
     d.targetWaypoint = {
       x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
-      y: lm.y,
       z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
       zone: lm.zone
     };
-    d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+    if (!d.pos) {
+      d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+    }
   });
 
   if (roamTimer) clearInterval(roamTimer);
   roamTimer = setInterval(() => {
     if (formationMode !== "roam") return;
+    const now = Date.now();
     disciples.forEach((d) => {
       if (!d.ready || !d.ws) return;
       if (!d.pos) d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
 
+      // Nghỉ chân tại chỗ: chỉ gửi keepalive mỗi 2.5s để tiết kiệm đường truyền
       if (d.idleTimer > 0) {
         d.idleTimer--;
-        d.send({ t: "state", x: d.pos.x, y: d.pos.y, z: d.pos.z, ry: d.pos.ry, s: d.idleTimer > 1 ? 0 : 2 });
+        if (!d.lastStateSend || now - d.lastStateSend > 2500) {
+          d.lastStateSend = now;
+          d.pos.y = getGroundY(d.pos.x, d.pos.z);
+          d.send({
+            t: "state",
+            x: d.pos.x,
+            y: d.pos.y,
+            z: d.pos.z,
+            ry: d.pos.ry,
+            s: 0
+          });
+        }
         return;
       }
 
+      // Chọn địa danh mới nếu chưa có
       if (!d.targetWaypoint) {
         const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
         const angle = Math.random() * Math.PI * 2;
         const radius = Math.random() * lm.radius;
         d.targetWaypoint = {
           x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
-          y: lm.y,
           z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
           zone: lm.zone
         };
@@ -300,36 +330,50 @@ function startRoaming() {
       const dz = d.targetWaypoint.z - d.pos.z;
       const dist = Math.hypot(dx, dz);
 
-      if (dist < 2.5) {
-        d.idleTimer = Math.floor(Math.random() * 3) + 2;
-        const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * lm.radius;
-        d.targetWaypoint = {
-          x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
-          y: lm.y,
-          z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
-          zone: lm.zone
-        };
+      // Đã tới điểm đến: nghỉ chân 3 - 6 giây (15 - 30 nhịp @ 200ms)
+      if (dist < 1.5) {
+        d.idleTimer = Math.floor(Math.random() * 16) + 15;
+        d.targetWaypoint = null;
+        d.pos.y = getGroundY(d.pos.x, d.pos.z);
+        d.lastStateSend = now;
+        d.send({
+          t: "state",
+          x: d.pos.x,
+          y: d.pos.y,
+          z: d.pos.z,
+          ry: d.pos.ry,
+          s: 0
+        });
         return;
       }
 
-      const stepDist = 1.4 + Math.random() * 0.8;
+      // Bước đi mượt mà tự nhiên: ~0.32m mỗi nhịp 200ms (= 1.6 m/s, chuẩn tốc độ đi của chú tiểu)
+      const stepDist = 0.32;
       const moveX = (dx / dist) * Math.min(stepDist, dist);
       const moveZ = (dz / dist) * Math.min(stepDist, dist);
       d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
       d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
-      d.pos.y = d.targetWaypoint.y;
+      d.pos.y = getGroundY(d.pos.x, d.pos.z);
       d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+      d.lastStateSend = now;
 
+      // Cập nhật zone khi chuyển khu vực
       if (d.currentZone !== d.targetWaypoint.zone) {
         d.currentZone = d.targetWaypoint.zone;
         d.send({ t: "visit", zone: d.targetWaypoint.zone });
       }
 
-      d.send({ t: "state", x: d.pos.x, y: d.pos.y, z: d.pos.z, ry: d.pos.ry, s: 1 });
+      // Gửi trạng thái đi bộ (s: 1)
+      d.send({
+        t: "state",
+        x: d.pos.x,
+        y: d.pos.y,
+        z: d.pos.z,
+        ry: d.pos.ry,
+        s: 1
+      });
     });
-  }, 1200);
+  }, 200);
 }
 
 function recallToHall() {
