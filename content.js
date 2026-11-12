@@ -374,31 +374,37 @@
   }
 
   function updateFollowTargetDropdownUI() {
-    const sel = document.getElementById("atd-select-follow-target");
-    const hint = document.getElementById("atd-follow-player-hint");
-    if (!sel) return;
+    try {
+      const sel = document.getElementById("atd-select-follow-target");
+      const hint = document.getElementById("atd-follow-player-hint");
+      if (!sel) return;
 
-    const currentVal = sel.value || (typeof headlessDisciples !== "undefined" ? headlessDisciples.followTargetId : "auto");
-    const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+      const currentVal = sel.value || (typeof headlessDisciples !== "undefined" ? headlessDisciples.followTargetId : "auto");
+      const players = Array.from(roomOtherPlayers.values()).filter((p) => p && !isOurDisciple(p.id, p.name));
 
-    sel.innerHTML = '<option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>';
-    players.forEach((p) => {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      const strId = String(p.id != null ? p.id : "");
-      opt.textContent = `👤 ${p.name || "Đạo hữu"} (${strId.slice(0, 5)})`;
-      if (String(opt.value) === String(currentVal)) opt.selected = true;
-      sel.appendChild(opt);
-    });
+      sel.innerHTML = '<option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>';
+      players.forEach((p) => {
+        if (!p) return;
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        const strId = String(p.id != null ? p.id : "");
+        const displayName = p.name || `Đạo hữu #${strId.slice(0, 4)}`;
+        opt.textContent = `👤 ${displayName} (${strId.slice(0, 5)})`;
+        if (String(opt.value) === String(currentVal)) opt.selected = true;
+        sel.appendChild(opt);
+      });
 
-    if (hint) {
-      if (players.length === 0) {
-        hint.textContent = "Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do";
-        hint.style.color = "#f59e0b";
-      } else {
-        hint.textContent = `Đang có ${players.length} đạo hữu trong chùa · Đệ tử sẽ bám sát theo sau`;
-        hint.style.color = "#34d399";
+      if (hint) {
+        if (players.length === 0) {
+          hint.textContent = "Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do";
+          hint.style.color = "#f59e0b";
+        } else {
+          hint.textContent = `Đang có ${players.length} đạo hữu trong chùa · Đệ tử sẽ bám sát theo sau`;
+          hint.style.color = "#34d399";
+        }
       }
+    } catch (err) {
+      console.warn("[ATD] updateFollowTargetDropdownUI error:", err);
     }
   }
 
