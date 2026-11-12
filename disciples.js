@@ -52,7 +52,41 @@ let customName = getArg("name", "");
 let autoBow = args.includes("--auto");
 let airWalk = args.includes("--air") || args.includes("--fly");
 let followPlayer = args.includes("--follow") || args.includes("--f");
+let corridorMode = args.includes("--corridor") || args.includes("--rows2") || args.includes("--guard");
+let randomLook = !args.includes("--uniform");
+let lookSeed = Math.floor(Math.random() * 10000);
 const SERVER_URL = "wss://didenchua.online/ws";
+
+// Tùy chọn trang phục, màu áo, pháp khí, tràng hạt, bồ đoàn ngẫu nhiên
+const DISCIPLE_LOOK_OPTIONS = {
+  kinds: ["tieu", "ni"],
+  robes: ["nau", "lam", "xam", "vang", "cam", "trang", "tieu", "sen", "xuan", "vulan", "tangoc"],
+  skins: ["sang", "hong", "dong", "nau"],
+  beads: ["go", "bode", "tram", "hophach", "ngoc", "mun", "manao", "maivang", "bachngoc", "hongngoc", "tuDan", "thachAnh", "bachHop", "bode108"],
+  cushions: ["xam", "nau", "vang", "son", "sen", "laSen", "gam"],
+  phapkhi: ["mo", "huong", "gio", "gaytruc", "kinh", "trentram", "truong", "nonla", "denlong", "chuong", "bat", "gaythan"]
+};
+
+function generateRandomDiscipleLook(index, seed = 0) {
+  const rng = (offset) => {
+    const x = Math.sin(index * 133.7 + seed * 99.1 + offset * 77.3) * 10000;
+    return Math.floor((x - Math.floor(x)) * 1000000);
+  };
+  const kinds = DISCIPLE_LOOK_OPTIONS.kinds;
+  const robes = DISCIPLE_LOOK_OPTIONS.robes;
+  const skins = DISCIPLE_LOOK_OPTIONS.skins;
+  const beads = DISCIPLE_LOOK_OPTIONS.beads;
+  const cushions = DISCIPLE_LOOK_OPTIONS.cushions;
+  const phapkhi = DISCIPLE_LOOK_OPTIONS.phapkhi;
+  return {
+    kind: kinds[rng(1) % kinds.length],
+    robe: robes[rng(2) % robes.length],
+    skin: skins[rng(3) % skins.length],
+    beads: beads[rng(4) % beads.length],
+    cushion: cushions[rng(5) % cushions.length],
+    phapkhi: phapkhi[rng(6) % phapkhi.length]
+  };
+}
 
 // Quản lý danh sách người chơi khác trong phòng để đệ tử bám theo
 const roomOtherPlayers = new Map();
@@ -60,11 +94,8 @@ const roomOtherPlayers = new Map();
 function isOurDisciple(id, name) {
   if (!id && !name) return false;
   if (disciples.some((d) => d.myId === id)) return true;
-  if (name) {
-    const base = (customName || "").trim();
-    if (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #")) return true;
-    if (base && name.startsWith(base)) return true;
-  }
+  if (name && disciples.some((d) => d.name === name)) return true;
+  if (name && (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #"))) return true;
   return false;
 }
 
@@ -127,13 +158,15 @@ const MAP_LANDMARKS = [
 
 // Tọa độ đứng quỳ trong Chánh điện cho các đệ tử
 function getHallOffset(index) {
-  const row = Math.floor((index - 1) / 6);
-  const col = (index - 1) % 6;
-  const xPositions = [-3.0, -1.8, -0.6, 0.6, 1.8, 3.0];
-  const rowStagger = (row % 2 === 1) ? 0.6 : 0;
+  const cols = targetCount > 100 ? 16 : (targetCount > 30 ? 12 : 8);
+  const col = (index - 1) % cols;
+  const row = Math.floor((index - 1) / cols);
+  const xSpacing = cols > 10 ? 0.9 : 1.2;
+  const xStart = -((cols - 1) * xSpacing) / 2;
+  const rowStagger = (row % 2 === 1) ? (xSpacing * 0.4) : 0;
   return {
-    x: (xPositions[col] != null ? xPositions[col] : 0) + rowStagger,
-    z: -2.6 - (row * 0.95)
+    x: Math.round((xStart + col * xSpacing + rowStagger) * 100) / 100,
+    z: Math.round((-2.6 - (row * 0.85)) * 100) / 100
   };
 }
 
@@ -177,19 +210,23 @@ class Disciple {
     this.ws.onopen = () => {
       this.connected = true;
       this.log(`Đã mở socket, đang gửi handshake...`, "\x1b[36m");
+      const look = randomLook
+        ? generateRandomDiscipleLook(this.index, lookSeed)
+        : { kind: "tieu", robe: "nau", skin: "dong", beads: "go", cushion: "vang", phapkhi: "mo" };
+      this.look = look;
       const helloPacket = {
         t: "hello",
         v: 2,
         cid: this.cid,
         adopt: false,
         name: this.name,
-        kind: "tieu",
-        robe: "nau",
-        skin: "dong",
+        kind: look.kind,
+        robe: look.robe,
+        skin: look.skin,
         bio: "Đệ tử trợ lực terminal",
-        beads: "go",
-        cushion: "vang",
-        phapkhi: "mo",
+        beads: look.beads,
+        cushion: look.cushion,
+        phapkhi: look.phapkhi,
         room: this.room,
         view: 90
       };
@@ -478,60 +515,103 @@ function startRoaming() {
       }
 
       if (targetPlayer) {
-        const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
-        const coFollowers = disciples.filter((otherD) => {
-          if (!otherD.ready) return false;
-          return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
-        });
-        const localSlot = Math.max(0, coFollowers.indexOf(d));
-
-        const row = Math.floor(localSlot / 3);
-        const col = (localSlot % 3) - 1;
-        const baseFollowDist = 1.8 + row * 1.0;
-        const lateralSpread = col * 1.1;
+        let localSlot = 0;
+        if (corridorMode) {
+          const readyList = disciples
+            .filter((otherD) => otherD.ready && otherD.ws && otherD.ws.readyState === 1)
+            .sort((a, b) => a.index - b.index);
+          const foundIdx = readyList.indexOf(d);
+          localSlot = foundIdx >= 0 ? foundIdx : (d.index - 1);
+        } else {
+          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+          const coFollowers = disciples.filter((otherD) => {
+            if (!otherD.ready) return false;
+            return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
+          }).sort((a, b) => a.index - b.index);
+          localSlot = Math.max(0, coFollowers.indexOf(d));
+        }
 
         const playerRy = targetPlayer.ry || 0;
-        const behindAngle = playerRy + Math.PI;
 
-        const slotX = targetPlayer.x + Math.sin(behindAngle) * baseFollowDist + Math.cos(behindAngle) * lateralSpread;
-        const slotZ = targetPlayer.z + Math.cos(behindAngle) * baseFollowDist - Math.sin(behindAngle) * lateralSpread;
+        // Vector tiến (Forward) theo hướng người chơi đang quay mặt:
+        const fX = Math.sin(playerRy);
+        const fZ = Math.cos(playerRy);
+
+        // Vector vuông góc sang tay trái (Left) của người chơi:
+        const leftX = Math.cos(playerRy);
+        const leftZ = -Math.sin(playerRy);
+
+        // Vector vuông góc sang tay phải (Right) của người chơi:
+        const rightX = -Math.cos(playerRy);
+        const rightZ = Math.sin(playerRy);
+
+        let slotX, slotZ;
+        if (corridorMode) {
+          // ĐỘI HÌNH 2 HÀNG DANH DỰ THẲNG TẮP (TẠO LỐI ĐI Ở GIỮA)
+          const isLeft = (localSlot % 2 === 0);
+          const rowInCorridor = Math.floor(localSlot / 2);
+          const corridorHalfWidth = 1.35; // Lối đi ở giữa rộng 2.7m
+          const baseFollowDist = 1.2 + rowInCorridor * 1.15; // Mỗi hàng cách nhau 1.15m
+
+          const latX = isLeft ? leftX : rightX;
+          const latZ = isLeft ? leftZ : rightZ;
+
+          slotX = targetPlayer.x - fX * baseFollowDist + latX * corridorHalfWidth;
+          slotZ = targetPlayer.z - fZ * baseFollowDist + latZ * corridorHalfWidth;
+        } else {
+          const totalFollowers = disciples.filter((x) => x.ready).length;
+          const formationWidth = totalFollowers > 30 ? 9 : (totalFollowers > 10 ? 5 : 3);
+          const row = Math.floor(localSlot / formationWidth);
+          const col = (localSlot % formationWidth) - Math.floor(formationWidth / 2);
+          const baseFollowDist = 1.8 + row * 0.85;
+
+          slotX = targetPlayer.x - fX * baseFollowDist + rightX * (col * 0.95);
+          slotZ = targetPlayer.z - fZ * baseFollowDist + rightZ * (col * 0.95);
+        }
 
         const dx = slotX - d.pos.x;
         const dz = slotZ - d.pos.z;
         const distToSlot = Math.hypot(dx, dz);
         const distToPlayer = Math.hypot(targetPlayer.x - d.pos.x, targetPlayer.z - d.pos.z);
 
-        let currentSpeed = d.baseSpeed || 0.28;
-        if (distToPlayer > 8.0) {
-          currentSpeed = Math.min(0.60, currentSpeed * 1.8);
-        } else if (distToPlayer > 4.5) {
-          currentSpeed = Math.min(0.45, currentSpeed * 1.4);
+        let currentSpeed = 0.28;
+        if (distToSlot > 6.0 || distToPlayer > 8.0) {
+          currentSpeed = 0.55;
+        } else if (distToSlot > 2.5 || distToPlayer > 4.5) {
+          currentSpeed = 0.40;
         }
 
-        if (distToSlot > 0.5) {
-          const step = Math.min(currentSpeed, distToSlot);
-          d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * step) * 100) / 100;
-          d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * step) * 100) / 100;
-          d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+        if (distToSlot > 0.03) {
+          if (distToSlot <= currentSpeed) {
+            d.pos.x = Math.round(slotX * 100) / 100;
+            d.pos.z = Math.round(slotZ * 100) / 100;
+          } else {
+            d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * currentSpeed) * 100) / 100;
+            d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * currentSpeed) * 100) / 100;
+          }
+          d.pos.ry = Math.round(playerRy * 100) / 100;
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
           d.lastStateSend = now;
 
+          const isWalking = distToSlot > 0.12;
           d.send({
             t: "state",
             x: d.pos.x,
             y: d.pos.y,
             z: d.pos.z,
             ry: d.pos.ry,
-            s: 1
+            s: isWalking ? 1 : (targetPlayer.s === 2 ? 2 : 0)
           });
           return;
         } else {
+          d.pos.x = Math.round(slotX * 100) / 100;
+          d.pos.z = Math.round(slotZ * 100) / 100;
           d.pos.ry = Math.round(playerRy * 100) / 100;
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
 
-          if (!d.lastStateSend || now - d.lastStateSend > 2000) {
+          if (!d.lastStateSend || now - d.lastStateSend >= 1200) {
             d.lastStateSend = now;
             const followState = (targetPlayer.s === 2) ? 2 : 0;
             d.send({
@@ -689,6 +769,27 @@ function adjustDiscipleCount(newCount) {
   }
 }
 
+async function shoutGreeting(customMsg) {
+  const readyDisciples = disciples.filter((d) => d.ready && d.ws);
+  if (readyDisciples.length === 0) {
+    console.log("\x1b[33m[CHÀO] Chưa có đệ tử nào sẵn sàng!\x1b[0m");
+    return;
+  }
+  const msg = (customMsg || "A Di Đà Phật! Kính chào quý sếp và chư vị đạo hữu!").trim();
+  console.log(`\x1b[32m[ĐỒNG THANH CHÀO] Các đệ tử bắt đầu hô: "${msg}"\x1b[0m`);
+  const shoutLimit = Math.min(6, readyDisciples.length);
+  for (let i = 0; i < shoutLimit; i++) {
+    const d = readyDisciples[i];
+    try {
+      d.send({ t: "emote", e: "chap" });
+      d.send({ t: "chat", text: msg });
+    } catch {}
+    if (i < shoutLimit - 1) {
+      await new Promise((r) => setTimeout(r, 350));
+    }
+  }
+}
+
 function printHeader() {
   console.clear();
   console.log("\x1b[1;36m========================================================================\x1b[0m");
@@ -708,6 +809,8 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'hall' + Enter\x1b[0m         : Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng");
   console.log("  • \x1b[1;33mGõ 'air' hoặc 'fly' + Enter\x1b[0m : Bật/tắt chế độ Đi trên không (Khinh công)");
   console.log("  • \x1b[1;33mGõ 'follow' hoặc 'f' + Enter\x1b[0m: Bật/tắt chế độ Tự đi theo người chơi khác");
+  console.log("  • \x1b[1;33mGõ 'corridor' hoặc 'hang2'\x1b[0m   : Bật/tắt đội hình 2 hàng danh dự tạo lối đi");
+  console.log("  • \x1b[1;33mGõ 'greet <câu chào>' + Enter\x1b[0m: Cho các đệ tử chắp tay hô chào sếp/đạo hữu");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
@@ -745,10 +848,10 @@ rl.on("line", (line) => {
     recallToHall();
   } else if (cmd.startsWith("count ") || cmd.startsWith("c ")) {
     const newCount = parseInt(cmd.replace(/^(count|c)\s+/, ""), 10);
-    if (!isNaN(newCount) && newCount >= 1 && newCount <= 100) {
+    if (!isNaN(newCount) && newCount >= 1 && newCount <= 499) {
       adjustDiscipleCount(newCount);
     } else {
-      console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 100!\x1b[0m");
+      console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 499!\x1b[0m");
     }
   } else if (cmd.startsWith("name ") || cmd.startsWith("ten ")) {
     const newName = line.trim().replace(/^(name|ten)\s+/i, "").trim();
@@ -798,6 +901,17 @@ rl.on("line", (line) => {
     if (followPlayer && formationMode !== "roam") {
       startRoaming();
     }
+  } else if (cmd === "corridor" || cmd === "hang2" || cmd === "loidi") {
+    corridorMode = !corridorMode;
+    console.log(`\x1b[36m[2 HÀNG DANH DỰ] Đã ${corridorMode ? "BẬT (xếp 2 hàng tạo lối đi thông thoáng ở giữa)" : "TẮT (trở về cánh cung)"}!\x1b[0m`);
+  } else if (cmd === "look" || cmd === "trangphuc" || cmd === "randomlook") {
+    randomLook = !randomLook;
+    lookSeed = Math.floor(Math.random() * 10000);
+    console.log(`\x1b[35m[TRANG PHỤC] Đã ${randomLook ? "BẬT ngẫu nhiên trang phục & pháp khí đa dạng" : "TẮT (áo nâu truyền thống)"}!\x1b[0m`);
+  } else if (cmd.startsWith("greet") || cmd.startsWith("chao")) {
+    const parts = line.trim().split(/\s+/);
+    const custom = parts.slice(1).join(" ").trim();
+    shoutGreeting(custom);
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();

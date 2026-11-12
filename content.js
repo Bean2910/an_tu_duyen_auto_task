@@ -76,6 +76,39 @@
     });
   }
 
+  // --- TÙY CHỌN TRANG PHỤC, MÀU ÁO, PHÁP KHÍ, TRÀNG HẠT VÀ BỒ ĐOÀN NGẪU NHIÊN ---
+  const DISCIPLE_LOOK_OPTIONS = {
+    kinds: ["tieu", "ni"],
+    robes: ["nau", "lam", "xam", "vang", "cam", "trang", "tieu", "sen", "xuan", "vulan", "tangoc"],
+    skins: ["sang", "hong", "dong", "nau"],
+    beads: ["go", "bode", "tram", "hophach", "ngoc", "mun", "manao", "maivang", "bachngoc", "hongngoc", "tuDan", "thachAnh", "bachHop", "bode108"],
+    cushions: ["xam", "nau", "vang", "son", "sen", "laSen", "gam"],
+    phapkhi: ["mo", "huong", "gio", "gaytruc", "kinh", "trentram", "truong", "nonla", "denlong", "chuong", "bat", "gaythan"]
+  };
+
+  function generateRandomDiscipleLook(index, seed = 0) {
+    const rng = (offset) => {
+      const x = Math.sin(index * 133.7 + seed * 99.1 + offset * 77.3) * 10000;
+      return Math.floor((x - Math.floor(x)) * 1000000);
+    };
+
+    const kinds = DISCIPLE_LOOK_OPTIONS.kinds;
+    const robes = DISCIPLE_LOOK_OPTIONS.robes;
+    const skins = DISCIPLE_LOOK_OPTIONS.skins;
+    const beads = DISCIPLE_LOOK_OPTIONS.beads;
+    const cushions = DISCIPLE_LOOK_OPTIONS.cushions;
+    const phapkhi = DISCIPLE_LOOK_OPTIONS.phapkhi;
+
+    return {
+      kind: kinds[rng(1) % kinds.length],
+      robe: robes[rng(2) % robes.length],
+      skin: skins[rng(3) % skins.length],
+      beads: beads[rng(4) % beads.length],
+      cushion: cushions[rng(5) % cushions.length],
+      phapkhi: phapkhi[rng(6) % phapkhi.length]
+    };
+  }
+
   let cloneTabCid = null;
   const cloneMonkName = isCloneTab ? `Đệ tử #${currentCloneId}` : "Chủ trì";
 
@@ -90,17 +123,16 @@
       try { sessionStorage.setItem(cloneKey, storedCid); } catch {}
       cloneTabCid = storedCid;
 
-      const robes = ["nau", "lam", "xam"];
-      const monkRobe = robes[(Number(currentCloneId) - 1) % robes.length] || "nau";
+      const cloneLook = generateRandomDiscipleLook(Number(currentCloneId), 42);
       const cloneProfileObj = {
         name: `Đệ tử #${currentCloneId}`,
-        kind: "tieu",
-        robe: monkRobe,
-        skin: "dong",
+        kind: cloneLook.kind,
+        robe: cloneLook.robe,
+        skin: cloneLook.skin,
         bio: `Đệ tử trợ lực #${currentCloneId}`,
-        beads: "go",
-        cushion: "vang",
-        phapkhi: "mo"
+        beads: cloneLook.beads,
+        cushion: cloneLook.cushion,
+        phapkhi: cloneLook.phapkhi
       };
 
       const origGet = Storage.prototype.getItem;
@@ -328,31 +360,83 @@
     { name: "Trước Chánh điện (Hiên)", zone: "Chánh điện", x: 0, z: 8, radius: 8 }
   ];
 
-  // --- THEO DÕI CÁC ĐẠO HỮU / NGƯỜI CHƠI KHÁC TRONG CHÙA (ĐỂ ĐỆ TỬ BÁM THEO) ---
+  // --- THEO DÕI CÁC ĐẠO HỮU & ACC CHÍNH TRONG CHÙA (ĐỂ ĐỆ TỬ BÁM THEO) ---
   const roomOtherPlayers = new Map(); // id -> { id, name, x, y, z, ry, s, lastUpdate }
   let mainPlayerId = null;
+  const mainAccountPosition = {
+    x: 0,
+    y: 2.4,
+    z: -3.0,
+    ry: Math.PI,
+    s: 0,
+    lastUpdate: 0
+  };
+  let mainAccountName = "Chủ trì (Bạn)";
 
   function isOurDisciple(id, name) {
     if (!id && !name) return false;
-    if (mainPlayerId && id === mainPlayerId) return true;
+    if (mainPlayerId && (id === mainPlayerId || String(id) === String(mainPlayerId))) return true;
     if (typeof headlessDisciples !== "undefined") {
-      if (headlessDisciples.disciples.some((d) => d.myId === id)) return true;
-      if (name) {
-        const base = (headlessDisciples.customName || "").trim();
-        if (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #")) return true;
-        if (base && name.startsWith(base)) return true;
+      // 1. Kiểm tra chính xác theo ID socket của đệ tử ngầm đã cấp bởi server
+      if (headlessDisciples.disciples.some((d) => d.myId != null && String(d.myId) === String(id))) return true;
+      // 2. Chỉ kiểm tra theo tên đệ tử nếu đệ tử đang thực sự BẬT và trùng khớp tên
+      if (headlessDisciples.enabled && name) {
+        if (headlessDisciples.disciples.some((d) => d.name && d.name === name)) return true;
       }
     }
-    if (name && (name.startsWith("Đệ tử #") || name.startsWith("Đệ tử ngầm"))) return true;
+    // Tên đệ tử mặc định
+    if (name && (name.startsWith("Đệ tử ngầm") || name.startsWith("Đệ tử #"))) return true;
     return false;
+  }
+
+  let updateFollowDropdownTimer = null;
+  function scheduleUpdateFollowTargetDropdownUI(delay = 350) {
+    if (updateFollowDropdownTimer) clearTimeout(updateFollowDropdownTimer);
+    updateFollowDropdownTimer = setTimeout(() => {
+      updateFollowDropdownTimer = null;
+      updateFollowTargetDropdownUI();
+    }, delay);
+  }
+
+  function getPlayerZoneName(x, z) {
+    if (typeof x !== "number" || typeof z !== "number") return "Trong chùa";
+    if (x >= -21 && x <= 21 && z >= -35 && z <= 4) return "Chánh điện";
+    if (x > 22 && z <= 30) return "Hồ sen";
+    if (x < -20 && z <= 45) return "Vườn thiền / Pháp đường";
+    if (z > 115) return "Cổng tam quan";
+    if (z > 55) return "Đường thần đạo / Vườn hoa";
+    if (z >= 4) return "Sân chùa";
+    return "Trong chùa";
+  }
+
+  function cleanStalePeers(force = false) {
+    const now = Date.now();
+    let changed = false;
+    const threshold = force ? 30000 : 75000;
+    const savedTarget = (typeof headlessDisciples !== "undefined" && headlessDisciples.followTargetId) ? String(headlessDisciples.followTargetId) : "";
+    for (const [id, p] of roomOtherPlayers.entries()) {
+      if (!p) {
+        roomOtherPlayers.delete(id);
+        changed = true;
+        continue;
+      }
+      // Không xóa mục tiêu đang được chọn bám theo để không mất lựa chọn
+      if (savedTarget && String(id) === savedTarget) continue;
+
+      if (now - (p.lastUpdate || 0) > threshold) {
+        roomOtherPlayers.delete(id);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   function registerOrUpdatePeer(peer) {
     if (!peer || peer.id == null) return;
     if (isOurDisciple(peer.id, peer.name)) return;
     const strId = String(peer.id);
-    const existing = roomOtherPlayers.get(peer.id) || {};
-    roomOtherPlayers.set(peer.id, {
+    const existing = roomOtherPlayers.get(peer.id) || roomOtherPlayers.get(strId) || {};
+    const updated = {
       id: peer.id,
       name: peer.name || existing.name || `Đạo hữu #${strId.slice(0, 4)}`,
       x: typeof peer.x === "number" ? peer.x : (existing.x || 0),
@@ -361,8 +445,9 @@
       ry: typeof peer.ry === "number" ? peer.ry : (existing.ry || 0),
       s: typeof peer.s === "number" ? peer.s : (existing.s || 0),
       lastUpdate: Date.now()
-    });
-    updateFollowTargetDropdownUI();
+    };
+    roomOtherPlayers.set(peer.id, updated);
+    scheduleUpdateFollowTargetDropdownUI(400);
   }
 
   function removePeer(id) {
@@ -370,7 +455,7 @@
     roomOtherPlayers.delete(id);
     roomOtherPlayers.delete(Number(id));
     roomOtherPlayers.delete(String(id));
-    updateFollowTargetDropdownUI();
+    scheduleUpdateFollowTargetDropdownUI(250);
   }
 
   function updateFollowTargetDropdownUI() {
@@ -379,28 +464,77 @@
       const hint = document.getElementById("atd-follow-player-hint");
       if (!sel) return;
 
-      const currentVal = sel.value || (typeof headlessDisciples !== "undefined" ? headlessDisciples.followTargetId : "auto");
-      const players = Array.from(roomOtherPlayers.values()).filter((p) => p && !isOurDisciple(p.id, p.name));
+      // Nếu người dùng đang mở hoặc click tương tác trên dropdown -> không vẽ lại đè mất focus
+      if (document.activeElement === sel) return;
 
-      sel.innerHTML = '<option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>';
+      cleanStalePeers(false);
+
+      const savedTarget = (typeof headlessDisciples !== "undefined" && headlessDisciples.followTargetId)
+        ? String(headlessDisciples.followTargetId)
+        : "master";
+      const currentVal = sel.value ? String(sel.value) : savedTarget;
+
+      const mainX = (typeof mainAccountPosition !== "undefined" && typeof mainAccountPosition.x === "number") ? mainAccountPosition.x : 0;
+      const mainZ = (typeof mainAccountPosition !== "undefined" && typeof mainAccountPosition.z === "number") ? mainAccountPosition.z : 0;
+
+      const players = Array.from(roomOtherPlayers.values())
+        .filter((p) => p && !isOurDisciple(p.id, p.name))
+        .map((p) => {
+          const hasPos = (typeof p.x === "number" && typeof p.z === "number");
+          const dist = hasPos ? Math.hypot(p.x - mainX, p.z - mainZ) : 999;
+          const zone = getPlayerZoneName(p.x, p.z);
+          return { ...p, dist, zone, hasPos };
+        })
+        .sort((a, b) => a.dist - b.dist);
+
+      let html = '';
+      html += `<option value="master">👑 Acc chính của bạn (${mainAccountName || 'Chủ trì'})</option>`;
+      html += `<option value="auto">👥 Tự động (Chia đều theo ${players.length} đạo hữu khác)</option>`;
+
+      let hasSelectedOptionInList = (currentVal === "master" || currentVal === "auto");
+
       players.forEach((p) => {
         if (!p) return;
-        const opt = document.createElement("option");
-        opt.value = p.id;
         const strId = String(p.id != null ? p.id : "");
         const displayName = p.name || `Đạo hữu #${strId.slice(0, 4)}`;
-        opt.textContent = `👤 ${displayName} (${strId.slice(0, 5)})`;
-        if (String(opt.value) === String(currentVal)) opt.selected = true;
-        sel.appendChild(opt);
+        const distText = p.hasPos && p.dist < 900 ? ` (~${Math.round(p.dist)}m)` : '';
+        const zoneText = p.zone ? ` · ${p.zone}` : '';
+        if (strId === currentVal) hasSelectedOptionInList = true;
+        html += `<option value="${strId}">👤 ${displayName} (${strId.slice(0, 5)})${zoneText}${distText}</option>`;
       });
 
+      // Nếu người chơi đã chọn một đạo hữu cụ thể nhưng đạo hữu đó đang ở xa / chưa có vị trí: giữ lại trong danh sách để không bị mất!
+      if (!hasSelectedOptionInList && currentVal && currentVal !== "master" && currentVal !== "auto") {
+        const pObj = roomOtherPlayers.get(currentVal) || roomOtherPlayers.get(Number(currentVal));
+        const keepName = pObj?.name || `Đạo hữu #${String(currentVal).slice(0, 5)}`;
+        html += `<option value="${currentVal}">👤 ${keepName} (Đang bám theo)</option>`;
+      }
+
+      sel.innerHTML = html;
+
+      if (currentVal) {
+        sel.value = currentVal;
+      }
+
       if (hint) {
-        if (players.length === 0) {
+        if (sel.value === "master") {
+          hint.textContent = "👑 Đệ tử xếp đội hình bám sát theo sau lưng Acc chính của bạn (Bạn đi đâu đệ tử theo đó)";
+          hint.style.color = "#38bdf8";
+        } else if (players.length === 0) {
           hint.textContent = "Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do";
           hint.style.color = "#f59e0b";
         } else {
-          hint.textContent = `Đang có ${players.length} đạo hữu trong chùa · Đệ tử sẽ bám sát theo sau`;
-          hint.style.color = "#34d399";
+          const chosenPeer = players.find((p) => String(p.id) === sel.value);
+          if (chosenPeer) {
+            hint.textContent = `🎯 Đang bám theo: ${chosenPeer.name} (${chosenPeer.zone || "Trong chùa"}${chosenPeer.hasPos ? `, ~${Math.round(chosenPeer.dist)}m` : ""})`;
+            hint.style.color = "#34d399";
+          } else {
+            hint.textContent = `Đang có ${players.length} đạo hữu trong chùa · Đệ tử sẽ bám sát theo sau`;
+            hint.style.color = "#34d399";
+          }
+        }
+        if (typeof headlessDisciples !== "undefined" && headlessDisciples.corridorMode && sel.value !== "auto") {
+          hint.textContent += " · 🛡️ 2 hàng tạo lối đi";
         }
       }
     } catch (err) {
@@ -413,13 +547,18 @@
     constructor() {
       this.disciples = [];
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
-      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
+      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(499, savedCount);
       this.formationMode = localStorage.getItem("atd_headless_mode") || "hall"; // "hall" | "roam"
       this.customName = (localStorage.getItem("atd_headless_name") || "").trim();
       this.autoNumber = localStorage.getItem("atd_headless_autonumber") !== "false";
       this.airWalk = localStorage.getItem("atd_headless_airwalk") === "true";
       this.followPlayer = localStorage.getItem("atd_headless_follow_player") === "true";
-      this.followTargetId = localStorage.getItem("atd_headless_follow_target") || "auto";
+      this.followTargetId = localStorage.getItem("atd_headless_follow_target") || "master";
+      this.corridorMode = localStorage.getItem("atd_headless_corridor") === "true";
+      this.randomLook = localStorage.getItem("atd_headless_random_look") !== "false";
+      this.lookSeed = Math.floor(Math.random() * 10000);
+      this.greetTemplate = localStorage.getItem("atd_headless_greet_tpl") || "Chào sếp {name}";
+      this.autoGreetOnSelect = localStorage.getItem("atd_headless_autogreet") === "true";
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
@@ -475,7 +614,8 @@
     setFollowPlayer(enabled) {
       this.followPlayer = !!enabled;
       localStorage.setItem("atd_headless_follow_player", this.followPlayer ? "true" : "false");
-      log(this.followPlayer ? "🚶 [BÁM THEO] Đã bật chế độ Tự động đi theo người chơi khác trong chùa!" : "🏃 Đã tắt bám theo: Đệ tử trở về đi dạo tự do.", "info");
+      const targetLabel = (this.followTargetId === "master") ? `Acc chính (${mainAccountName || "Chủ trì"})` : "đạo hữu trong chùa";
+      log(this.followPlayer ? `🚶 [BÁM THEO] Đã bật chế độ Tự động đi theo ${targetLabel}!` : "🏃 Đã tắt bám theo: Đệ tử trở về đi dạo tự do.", "info");
       if (this.followPlayer && this.formationMode === "hall") {
         this.startRoaming(true);
       }
@@ -483,11 +623,93 @@
     }
 
     setFollowTarget(targetId) {
-      this.followTargetId = targetId || "auto";
+      this.followTargetId = targetId || "master";
       localStorage.setItem("atd_headless_follow_target", this.followTargetId);
-      const targetName = (this.followTargetId === "auto") ? "Tất cả đạo hữu" : (roomOtherPlayers.get(this.followTargetId)?.name || this.followTargetId);
+      const pObj = roomOtherPlayers.get(this.followTargetId) || roomOtherPlayers.get(Number(this.followTargetId));
+      const targetName = (this.followTargetId === "master")
+        ? `Acc chính (${mainAccountName || "Chủ trì"})`
+        : (this.followTargetId === "auto" ? "Tất cả đạo hữu khác" : (pObj?.name || `Đạo hữu #${String(this.followTargetId).slice(0, 5)}`));
       log(`🎯 Đã chọn mục tiêu bám theo: ${targetName}`, "info");
+      if (this.autoGreetOnSelect && this.enabled && this.followTargetId !== "auto") {
+        setTimeout(() => this.shoutGreeting(), 600);
+      }
       this.updateUI();
+    }
+
+    setCorridorMode(enabled) {
+      this.corridorMode = !!enabled;
+      localStorage.setItem("atd_headless_corridor", this.corridorMode ? "true" : "false");
+      log(this.corridorMode ? "🛡️ [ĐỘI HÌNH] Đã bật 2 hàng danh dự (tạo lối đi ở giữa khi theo sau 1 người)!" : "🚶 Đã chuyển về đội hình hộ tống cánh cung.", "info");
+      this.updateUI();
+    }
+
+    setRandomLook(enabled) {
+      this.randomLook = !!enabled;
+      localStorage.setItem("atd_headless_random_look", this.randomLook ? "true" : "false");
+      log(this.randomLook ? "🎨 [TRANG PHỤC] Đã bật ngẫu nhiên trang phục, màu áo và pháp khí cho đệ tử!" : "👕 Đã tắt ngẫu nhiên: Đệ tử mặc áo nâu truyền thống.", "info");
+      this.updateUI();
+    }
+
+    getChosenTargetName() {
+      if (!this.followTargetId || this.followTargetId === "master") {
+        return mainAccountName || "Chủ trì";
+      }
+      if (this.followTargetId === "auto") {
+        return "các Đạo hữu";
+      }
+      const p = roomOtherPlayers.get(this.followTargetId) || roomOtherPlayers.get(Number(this.followTargetId));
+      return p?.name || `Đạo hữu #${String(this.followTargetId).slice(0, 5)}`;
+    }
+
+    formatGreetingMessage(template) {
+      const rawTargetName = this.getChosenTargetName();
+      const targetName = rawTargetName.replace(/^[👑👤\s]+/, "").trim();
+      let tpl = (template || this.greetTemplate || "Chào sếp {name}").trim();
+      if (!tpl) tpl = "Chào sếp {name}";
+      if (/{name}|{ten}/i.test(tpl)) {
+        return tpl.replace(/{name}|{ten}/gi, targetName);
+      }
+      return `${tpl} ${targetName}`;
+    }
+
+    setGreetTemplate(tpl) {
+      this.greetTemplate = (tpl || "Chào sếp {name}").trim();
+      localStorage.setItem("atd_headless_greet_tpl", this.greetTemplate);
+      this.updateUI();
+    }
+
+    setAutoGreetOnSelect(enabled) {
+      this.autoGreetOnSelect = !!enabled;
+      localStorage.setItem("atd_headless_autogreet", this.autoGreetOnSelect ? "true" : "false");
+      this.updateUI();
+    }
+
+    async shoutGreeting(customMsg) {
+      if (!this.enabled || this.disciples.length === 0) {
+        log("⚠️ Đệ tử chưa bật, vui lòng bật đệ tử trước khi hô chào!", "warn");
+        return;
+      }
+      const readyDisciples = this.disciples.filter((d) => d.connected && d.ready && d.ws);
+      if (readyDisciples.length === 0) {
+        log("⏳ Các đệ tử đang kết nối, vui lòng chờ giây lát...", "wait");
+        return;
+      }
+
+      const msg = customMsg || this.formatGreetingMessage();
+      const targetName = this.getChosenTargetName();
+      log(`📣 [ĐỒNG THANH CHÀO] Các đệ tử bắt đầu hô: "${msg}" gửi đến ${targetName}!`, "ok");
+
+      const shoutLimit = Math.min(6, readyDisciples.length);
+      for (let i = 0; i < shoutLimit; i++) {
+        const d = readyDisciples[i];
+        try {
+          d.ws.send(JSON.stringify({ t: "emote", e: "chap" }));
+          d.ws.send(JSON.stringify({ t: "chat", text: msg }));
+        } catch {}
+        if (i < shoutLimit - 1) {
+          await sleep(350);
+        }
+      }
     }
 
     getDiscipleName(index) {
@@ -516,16 +738,16 @@
     }
 
     getOffsetForIndex(index) {
-      const cols = 8;
+      const cols = this.targetCount > 100 ? 16 : (this.targetCount > 30 ? 12 : 8);
       const col = (index - 1) % cols;
       const row = Math.floor((index - 1) / cols);
-      const xStart = -4.2;
-      const xSpacing = 1.2;
+      const xSpacing = cols > 10 ? 0.9 : 1.2;
+      const xStart = -((cols - 1) * xSpacing) / 2;
       // So le hàng so le (staggered) dạng bàn cờ để không xếp thành hàng ngang tăm tắp
-      const rowStagger = (row % 2 === 1) ? 0.6 : 0;
+      const rowStagger = (row % 2 === 1) ? (xSpacing * 0.4) : 0;
       return {
         x: Math.round((xStart + col * xSpacing + rowStagger) * 100) / 100,
-        z: Math.round((-2.6 - (row * 0.95)) * 100) / 100
+        z: Math.round((-2.6 - (row * 0.85)) * 100) / 100
       };
     }
 
@@ -538,17 +760,19 @@
 
     start(count) {
       if (typeof count === "number" && !isNaN(count) && count >= 1) {
-        this.targetCount = Math.min(100, Math.max(1, count));
+        this.targetCount = Math.min(499, Math.max(1, count));
       }
       this.stop(true);
       this.enabled = true;
+      this.lookSeed = Math.floor(Math.random() * 10000);
       const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
       const displayName = this.customName || "Đệ tử ngầm";
       log(`⚡ Đang kết nối ${this.targetCount} ${displayName} vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
 
-      // Giãn cách mở kết nối (~80ms/đệ tử) để kết nối êm ái, tránh bị server chặn spam
+      // Giãn cách mở kết nối linh hoạt (35ms - 80ms/đệ tử) để kết nối êm ái, tránh bị server chặn spam
+      const delayStep = this.targetCount > 100 ? 35 : (this.targetCount > 30 ? 50 : 80);
       for (let i = 1; i <= this.targetCount; i++) {
-        const delay = (i - 1) * 80;
+        const delay = (i - 1) * delayStep;
         if (delay === 0) {
           this.spawnDisciple(i, curRoom);
         } else {
@@ -605,19 +829,24 @@
           return;
         }
         disciple.connected = true;
+        const look = this.randomLook
+          ? generateRandomDiscipleLook(index, this.lookSeed)
+          : { kind: "tieu", robe: "nau", skin: "dong", beads: "go", cushion: "vang", phapkhi: "mo" };
+        disciple.look = look;
+
         const helloPacket = {
           t: "hello",
           v: 2,
           cid: disciple.cid,
           adopt: false,
           name: disciple.name,
-          kind: "tieu",
-          robe: "nau",
-          skin: "dong",
+          kind: look.kind,
+          robe: look.robe,
+          skin: look.skin,
           bio: "Đệ tử trợ lực ngầm",
-          beads: "go",
-          cushion: "vang",
-          phapkhi: "mo",
+          beads: look.beads,
+          cushion: look.cushion,
+          phapkhi: look.phapkhi,
           room: disciple.room,
           view: 90
         };
@@ -676,20 +905,10 @@
               this.sendToHall(disciple);
               log(`⚡ [${disciple.name}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
             }
-            if (Array.isArray(msg.peers)) {
-              msg.peers.forEach(registerOrUpdatePeer);
-            }
             this.updateUI();
             updateSwarmInfoUI();
           } else if (msg.t === "room") {
             disciple.room = msg.room;
-            if (Array.isArray(msg.peers)) {
-              msg.peers.forEach(registerOrUpdatePeer);
-            }
-          } else if (msg.t === "join" && msg.peer) {
-            registerOrUpdatePeer(msg.peer);
-          } else if (msg.t === "leave" && msg.id) {
-            removePeer(msg.id);
           } else if (msg.t === "state" && msg.id) {
             const p = roomOtherPlayers.get(msg.id);
             if (p) {
@@ -922,63 +1141,133 @@
           };
         }
 
-        // BÁM THEO NGƯỜI CHƠI KHÁC TRONG CHÙA (NẾU BẬT)
+        // BÁM THEO ACC CHÍNH HOẶC NGƯỜI CHƠI KHÁC TRONG CHÙA (NẾU BẬT)
         let targetPlayer = null;
         if (this.followPlayer) {
-          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
-          if (players.length > 0) {
-            if (this.followTargetId && this.followTargetId !== "auto") {
-              targetPlayer = players.find((p) => String(p.id) === String(this.followTargetId));
-            }
-            if (!targetPlayer) {
-              const assignedIdx = (d.index - 1) % players.length;
-              targetPlayer = players[assignedIdx];
+          if (!this.followTargetId || this.followTargetId === "master") {
+            // Đi theo Acc chính (Chủ trì / Bạn đi đâu đệ tử theo đó)
+            targetPlayer = {
+              id: "master",
+              name: mainAccountName || "Chủ trì",
+              x: mainAccountPosition.x,
+              y: mainAccountPosition.y,
+              z: mainAccountPosition.z,
+              ry: mainAccountPosition.ry,
+              s: mainAccountPosition.s
+            };
+          } else {
+            const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+            if (players.length > 0) {
+              if (this.followTargetId !== "auto") {
+                targetPlayer = players.find((p) => String(p.id) === String(this.followTargetId));
+              }
+              if (!targetPlayer) {
+                const assignedIdx = (d.index - 1) % players.length;
+                targetPlayer = players[assignedIdx];
+              }
             }
           }
         }
 
         if (targetPlayer) {
-          const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
-          const coFollowers = this.disciples.filter((otherD) => {
-            if (!otherD.ready) return false;
-            if (this.followTargetId && this.followTargetId !== "auto") return true;
-            return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
-          });
-          const localSlot = Math.max(0, coFollowers.indexOf(d));
-
-          // Đội hình hộ tống hình cánh cung sau lưng người chơi:
-          const row = Math.floor(localSlot / 3);
-          const col = (localSlot % 3) - 1; // -1 (trái), 0 (giữa), 1 (phải)
-          const baseFollowDist = 1.8 + row * 1.0;
-          const lateralSpread = col * 1.1;
+          let localSlot = 0;
+          if (targetPlayer.id === "master" || (this.followTargetId && this.followTargetId !== "auto")) {
+            // Theo sau 1 người duy nhất (Acc chính hoặc 1 đạo hữu được chọn):
+            // Sắp xếp các đệ tử đang sẵn sàng theo index để đảm bảo vị trí 2 hàng liên tục, không bị nhảy slot
+            const readyList = this.disciples
+              .filter((otherD) => otherD.ready && otherD.ws && otherD.ws.readyState === WebSocket.OPEN)
+              .sort((a, b) => a.index - b.index);
+            const foundIdx = readyList.indexOf(d);
+            localSlot = foundIdx >= 0 ? foundIdx : (d.index - 1);
+          } else {
+            const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+            const coFollowers = this.disciples.filter((otherD) => {
+              if (!otherD.ready) return false;
+              return ((otherD.index - 1) % players.length) === ((d.index - 1) % players.length);
+            }).sort((a, b) => a.index - b.index);
+            localSlot = Math.max(0, coFollowers.indexOf(d));
+          }
 
           const playerRy = targetPlayer.ry || 0;
-          const behindAngle = playerRy + Math.PI;
 
-          const slotX = targetPlayer.x + Math.sin(behindAngle) * baseFollowDist + Math.cos(behindAngle) * lateralSpread;
-          const slotZ = targetPlayer.z + Math.cos(behindAngle) * baseFollowDist - Math.sin(behindAngle) * lateralSpread;
+          // Vector tiến (Forward) theo hướng người chơi đang quay mặt:
+          const fX = Math.sin(playerRy);
+          const fZ = Math.cos(playerRy);
+
+          // Vector vuông góc sang tay trái (Left) của người chơi:
+          const leftX = Math.cos(playerRy);
+          const leftZ = -Math.sin(playerRy);
+
+          // Vector vuông góc sang tay phải (Right) của người chơi:
+          const rightX = -Math.cos(playerRy);
+          const rightZ = Math.sin(playerRy);
+
+          // Kiểm tra xem có đang theo sau 1 người duy nhất hay không (Acc chính hoặc 1 đạo hữu cụ thể)
+          const isSingleTarget = (targetPlayer.id === "master" || (this.followTargetId && this.followTargetId !== "auto"));
+          const useCorridor = this.corridorMode && isSingleTarget;
+
+          let slotX, slotZ;
+          if (useCorridor) {
+            // ĐỘI HÌNH 2 HÀNG DANH DỰ THẲNG TẮP (TẠO LỐI ĐI Ở GIỮA)
+            const isLeft = (localSlot % 2 === 0);
+            const rowInCorridor = Math.floor(localSlot / 2);
+            const corridorHalfWidth = 1.35; // Lối đi ở giữa rộng 2.7m
+            const baseFollowDist = 1.2 + rowInCorridor * 1.15; // Mỗi hàng cách nhau 1.15m
+
+            const latX = isLeft ? leftX : rightX;
+            const latZ = isLeft ? leftZ : rightZ;
+
+            // Đứng song song 2 bên trục tiến của người chơi, thẳng hàng tuyệt đối:
+            slotX = targetPlayer.x - fX * baseFollowDist + latX * corridorHalfWidth;
+            slotZ = targetPlayer.z - fZ * baseFollowDist + latZ * corridorHalfWidth;
+          } else {
+            // ĐỘI HÌNH HỘ TỐNG HÌNH CÁNH CUNG (MẶC ĐỊNH)
+            const totalFollowers = targetPlayer.id === "master" ? this.getActiveCount() : 5;
+            const formationWidth = totalFollowers > 30 ? 9 : (totalFollowers > 10 ? 5 : 3);
+            const row = Math.floor(localSlot / formationWidth);
+            const col = (localSlot % formationWidth) - Math.floor(formationWidth / 2);
+            const baseFollowDist = 1.8 + row * 0.85;
+
+            slotX = targetPlayer.x - fX * baseFollowDist + rightX * (col * 0.95);
+            slotZ = targetPlayer.z - fZ * baseFollowDist + rightZ * (col * 0.95);
+          }
 
           const dx = slotX - d.pos.x;
           const dz = slotZ - d.pos.z;
           const distToSlot = Math.hypot(dx, dz);
           const distToPlayer = Math.hypot(targetPlayer.x - d.pos.x, targetPlayer.z - d.pos.z);
 
-          let currentSpeed = d.baseSpeed || 0.28;
-          if (distToPlayer > 8.0) {
-            currentSpeed = Math.min(0.60, currentSpeed * 1.8);
-          } else if (distToPlayer > 4.5) {
-            currentSpeed = Math.min(0.45, currentSpeed * 1.4);
+          // Tốc độ di chuyển chuẩn xác theo khoảng cách
+          let currentSpeed = 0.28;
+          if (distToSlot > 6.0 || distToPlayer > 8.0) {
+            currentSpeed = 0.55;
+          } else if (distToSlot > 2.5 || distToPlayer > 4.5) {
+            currentSpeed = 0.40;
           }
 
-          if (distToSlot > 0.5) {
-            const step = Math.min(currentSpeed, distToSlot);
-            d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * step) * 100) / 100;
-            d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * step) * 100) / 100;
-            d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+          // Cập nhật zone khi theo Acc chính
+          if (targetPlayer.id === "master" && currentZone && d.currentZone !== currentZone) {
+            d.currentZone = currentZone;
+            try { d.ws.send(JSON.stringify({ t: "visit", zone: currentZone })); } catch {}
+          }
+
+          // Nếu khoảng cách lớn hơn 3cm: tiếp tục bước tới đích
+          if (distToSlot > 0.03) {
+            if (distToSlot <= currentSpeed) {
+              // Khoảng cách nằm trong tầm 1 bước: Snap trực diện vào vị trí slot để 2 hàng luôn thẳng tắp không bị lệch!
+              d.pos.x = Math.round(slotX * 100) / 100;
+              d.pos.z = Math.round(slotZ * 100) / 100;
+            } else {
+              d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * currentSpeed) * 100) / 100;
+              d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * currentSpeed) * 100) / 100;
+            }
+            // Hướng mặt thẳng theo hướng người chơi để toàn đội hình đồng bộ thẳng tắp
+            d.pos.ry = Math.round(playerRy * 100) / 100;
             const moveGroundY = getGroundY(d.pos.x, d.pos.z);
             d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
             d.lastStateSend = now;
 
+            const isWalking = distToSlot > 0.12;
             try {
               d.ws.send(JSON.stringify({
                 t: "state",
@@ -986,16 +1275,19 @@
                 y: d.pos.y,
                 z: d.pos.z,
                 ry: d.pos.ry,
-                s: 1
+                s: isWalking ? 1 : (targetPlayer.s === 2 ? 2 : 0)
               }));
             } catch {}
             return;
           } else {
+            // Đã ở ngay vị trí đích: giữ chuẩn xác tọa độ slot và quay mặt theo người chơi
+            d.pos.x = Math.round(slotX * 100) / 100;
+            d.pos.z = Math.round(slotZ * 100) / 100;
             d.pos.ry = Math.round(playerRy * 100) / 100;
             const moveGroundY = getGroundY(d.pos.x, d.pos.z);
             d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
 
-            if (!d.lastStateSend || now - d.lastStateSend >= 2000) {
+            if (!d.lastStateSend || now - d.lastStateSend >= 1200) {
               d.lastStateSend = now;
               const followState = (targetPlayer.s === 2) ? 2 : 0;
               try {
@@ -1211,7 +1503,10 @@
       if (btnHall) btnHall.classList.toggle("active", this.formationMode === "hall");
       if (btnRoam) btnRoam.classList.toggle("active", this.formationMode === "roam");
       if (modeBadge) {
-        let text = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : (this.followPlayer ? "🚶 Bám theo đạo hữu" : "🏃 Đi dạo tự do khắp chùa");
+        let text = this.formationMode === "hall"
+          ? "🏛️ Tập trung Chánh điện"
+          : (this.followPlayer ? (this.followTargetId === "master" ? "🚶 Bám theo Acc chính" : "🚶 Bám theo đạo hữu") : "🏃 Đi dạo tự do khắp chùa");
+        if (this.followPlayer && this.corridorMode) text += " · 🛡️ 2 hàng";
         if (this.airWalk) text += " · ☁️ Khinh công";
         modeBadge.textContent = text;
         modeBadge.style.color = this.airWalk ? "#c084fc" : (this.formationMode === "hall" ? "#e5bc72" : (this.followPlayer ? "#38bdf8" : "#34d399"));
@@ -1224,11 +1519,33 @@
       if (chkFollow) {
         chkFollow.checked = this.followPlayer;
       }
+      const chkCorridor = $("#atd-chk-corridor");
+      if (chkCorridor) {
+        chkCorridor.checked = this.corridorMode;
+      }
+      const chkRandomLook = $("#atd-headless-randomlook");
+      if (chkRandomLook) {
+        chkRandomLook.checked = this.randomLook;
+      }
       const followWrap = $("#atd-follow-target-wrap");
       if (followWrap) {
         followWrap.style.display = this.followPlayer ? "block" : "none";
       }
       updateFollowTargetDropdownUI();
+
+      const inputGreetTpl = $("#atd-greet-template");
+      if (inputGreetTpl && document.activeElement !== inputGreetTpl) {
+        inputGreetTpl.value = this.greetTemplate;
+      }
+      const chkAutoGreet = $("#atd-chk-autogreet");
+      if (chkAutoGreet) {
+        chkAutoGreet.checked = this.autoGreetOnSelect;
+      }
+      const greetPreview = $("#atd-greet-preview");
+      if (greetPreview) {
+        const previewMsg = this.formatGreetingMessage();
+        greetPreview.textContent = `Xem trước: "${previewMsg}"`;
+      }
 
       if (input && document.activeElement !== input) {
         input.value = this.targetCount;
@@ -2240,6 +2557,17 @@
             payload.name = `Đệ tử #${currentCloneId}`;
             args[0] = JSON.stringify(payload);
             console.log(`[AutoTask] Clone #${currentCloneId} enforced distinct UUID:`, cloneTabCid, "Name:", payload.name);
+          } else if (payload.t === "hello" && !isCloneTab && payload.name) {
+            mainAccountName = payload.name;
+            try { updateFollowTargetDropdownUI(); } catch {}
+          }
+          if (payload.t === "state" && !isCloneTab && typeof payload.x === "number") {
+            mainAccountPosition.x = payload.x;
+            mainAccountPosition.y = payload.y;
+            mainAccountPosition.z = payload.z;
+            if (typeof payload.ry === "number") mainAccountPosition.ry = payload.ry;
+            if (typeof payload.s === "number") mainAccountPosition.s = payload.s;
+            mainAccountPosition.lastUpdate = Date.now();
           }
           if (payload.t === "lv-xuong") {
             lastLandedCraneTime = Date.now();
@@ -5196,16 +5524,23 @@
                 <span>👥 Số lượng:</span>
               </div>
               <div class="atd-headless-input-ctrl">
-                <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
+                <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="499" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 499 đệ tử)" />
                 <div class="atd-headless-presets">
                   <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn 4 đệ tử (Chuẩn ăn trọn x5 Đồng Tâm +9 công đức)">4 ⭐</button>
                   <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn 10 đệ tử">10</button>
-                  <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn 20 đệ tử">20</button>
-                  <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Kịch trần 1 mạng WiFi)">29 Max</button>
-                  <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn 50 đệ tử (Đại tăng đoàn)">50</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Kịch trần 1 mạng WiFi)">29 Max IP</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn 50 đệ tử">50</button>
                   <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn 100 đệ tử">100</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="200" title="Chọn 200 đệ tử">200</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="499" title="Chọn 499 đệ tử (Kịch trần dưới 500)">499 🔥</button>
                 </div>
               </div>
+            </div>
+            <div style="margin: 4px 0 6px 0; display:flex; align-items:center; gap:8px;">
+              <label class="atd-randomlook-label" title="Ngẫu nhiên trang phục áo cà sa, pháp khí cầm tay (trượng 9 khoen, giỏ sen, nón lá, đèn lồng, kinh...), tràng hạt và bồ đoàn cho từng đệ tử để tạo thành tăng đoàn đa dạng, sống động">
+                <input type="checkbox" id="atd-headless-randomlook" checked />
+                <span>🎨 <b>Ngẫu nhiên trang phục & pháp khí</b> (Đa dạng)</span>
+              </label>
             </div>
             <div class="atd-clone-btns">
               <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm">
@@ -5239,18 +5574,46 @@
                 <span>☁️ <b>Đi trên không</b> (Khinh công lướt mây)</span>
               </label>
             </div>
-            <!-- Chức năng Tự động đi theo người chơi khác trong chùa -->
+            <!-- Chức năng Tự động đi theo Acc chính / người chơi khác trong chùa -->
             <div class="atd-follow-box">
-              <label class="atd-follow-label" title="Bật để đệ tử tự động bám theo sau lưng người chơi / đạo hữu khác đang có mặt trong chùa">
+              <label class="atd-follow-label" title="Bật để đệ tử tự động bám theo sau lưng Acc chính hoặc người chơi khác đang có mặt trong chùa">
                 <input type="checkbox" id="atd-chk-follow-player" />
-                <span>🚶 <b>Tự đi theo người chơi khác</b> trong chùa</span>
+                <span>🚶 <b>Tự đi theo Acc chính / Người chơi</b></span>
               </label>
               <div id="atd-follow-target-wrap" style="display:none; margin-top:6px; padding-left:18px;">
-                <div style="font-size:11px; color:#cbd5e1; margin-bottom:3px;">Mục tiêu theo sau:</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                  <span style="font-size:11px; color:#cbd5e1;">Mục tiêu theo sau:</span>
+                  <button type="button" id="atd-btn-refresh-peers" title="Làm mới danh sách đạo hữu đang có mặt trong chùa" style="padding:1px 6px; font-size:10px; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; border-radius:3px; cursor:pointer;">↻ Làm mới</button>
+                </div>
                 <select id="atd-select-follow-target" style="width:100%; padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.85); color:#f8fafc; border:1px solid rgba(56,189,248,0.3); border-radius:5px; outline:none;">
-                  <option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu)</option>
+                  <option value="master">👑 Acc chính của bạn (Chủ trì / Bạn đi đâu đệ tử theo đó)</option>
+                  <option value="auto">👥 Tự động (Chia đều theo tất cả đạo hữu khác)</option>
                 </select>
-                <div id="atd-follow-player-hint" style="font-size:10.5px; color:#94a3b8; margin-top:3px; font-style:italic;">Chưa có đạo hữu khác trong phòng · Đệ tử tạm thời đi dạo tự do</div>
+                <div id="atd-follow-player-hint" style="font-size:10.5px; color:#38bdf8; margin-top:3px; font-style:italic;">👑 Đệ tử xếp đội hình bám sát theo sau lưng Acc chính của bạn (Bạn đi đâu đệ tử theo đó)</div>
+                <div style="margin-top:7px; padding-top:6px; border-top:1px dashed rgba(56,189,248,0.25);">
+                  <label class="atd-corridor-label" title="Khi theo sau 1 người (Acc chính hoặc 1 đạo hữu): Xếp đệ tử thành 2 hàng dọc 2 bên, tạo thành một lối đi thông thoáng ở giữa">
+                    <input type="checkbox" id="atd-chk-corridor" />
+                    <span>🛡️ <b>Xếp 2 hàng tạo lối đi ở giữa</b> (Danh dự)</span>
+                  </label>
+                </div>
+                <div style="margin-top:8px; padding-top:7px; border-top:1px dashed rgba(56,189,248,0.25);">
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                    <span style="font-size:11px; color:#fde68a; font-weight:600;">💬 Chat chào theo tên người được chọn:</span>
+                    <label class="atd-autogreet-label" title="Tự động cho đệ tử chắp tay hô chào khi bạn chọn mục tiêu mới trong danh sách">
+                      <input type="checkbox" id="atd-chk-autogreet" checked />
+                      <span>Tự chào khi chọn</span>
+                    </label>
+                  </div>
+                  <div style="display:flex; gap:5px; align-items:center;">
+                    <input type="text" id="atd-greet-template" style="flex:1; padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.85); color:#fef08a; border:1px solid rgba(250,204,21,0.35); border-radius:4px; outline:none;" placeholder="Chào sếp {name}" value="Chào sếp {name}" title="Nhập mẫu câu chat ({name} sẽ tự động thay bằng tên người được chọn)" />
+                    <button type="button" id="atd-btn-shout-greet" style="padding:4px 10px; font-size:11px; font-weight:600; background:linear-gradient(135deg, #eab308, #ca8a04); color:#000; border:none; border-radius:4px; cursor:pointer; white-space:nowrap;" title="Lệnh cho các đệ tử đồng thanh chắp tay hô to câu chào này ngay lập tức!">
+                      📣 Hô chào sếp!
+                    </button>
+                  </div>
+                  <div id="atd-greet-preview" style="font-size:10.5px; color:#fef08a; margin-top:3px; font-style:italic; opacity:0.9;">
+                    Ví dụ chat: "Chào sếp Thích có lương"
+                  </div>
+                </div>
               </div>
             </div>
             <div class="atd-clone-btns" style="margin-top:4px;">
@@ -5285,7 +5648,7 @@
               <span>🚀 Cách tăng số lượng vượt trần 29 đệ tử</span>
             </div>
             <div class="atd-scale-info">
-              <div>Server <code>didenchua.online</code> giới hạn kịch trần <b>30 kết nối/IP</b> (1 tab chính + 29 đệ tử). Để tạo 50 đến 100+ đệ tử:</div>
+              <div>Server <code>didenchua.online</code> giới hạn kịch trần <b>30 kết nối/IP</b> (1 tab chính + 29 đệ tử). Để tạo 50 đến 499 đệ tử:</div>
               <div class="atd-scale-item">
                 <b>Cách 1 (Dễ nhất - Đa mạng):</b> Dùng thêm 1 máy khác hoặc điện thoại phát 4G/5G mở phòng chùa tương tự hoặc chạy terminal. Mỗi mạng sẽ thêm được 30 đệ tử!
               </div>
@@ -5531,11 +5894,48 @@
       });
     }
 
+    const chkCorridor = $("#atd-chk-corridor", panel);
+    if (chkCorridor) {
+      chkCorridor.checked = headlessDisciples.corridorMode;
+      chkCorridor.addEventListener("change", () => {
+        headlessDisciples.setCorridorMode(chkCorridor.checked);
+      });
+    }
+
     const selFollow = $("#atd-select-follow-target", panel);
     if (selFollow) {
-      selFollow.value = headlessDisciples.followTargetId || "auto";
+      selFollow.value = headlessDisciples.followTargetId || "master";
       selFollow.addEventListener("change", () => {
         headlessDisciples.setFollowTarget(selFollow.value);
+      });
+    }
+
+    const btnRefreshPeers = $("#atd-btn-refresh-peers", panel);
+    if (btnRefreshPeers) {
+      btnRefreshPeers.addEventListener("click", () => {
+        cleanStalePeers(true);
+        updateFollowTargetDropdownUI();
+        log("🔄 Đã làm mới danh sách đạo hữu đang có mặt trong chùa", "info");
+      });
+    }
+
+    const btnShout = $("#atd-btn-shout-greet", panel);
+    if (btnShout) {
+      btnShout.addEventListener("click", () => headlessDisciples.shoutGreeting());
+    }
+    const chkAutoGreet = $("#atd-chk-autogreet", panel);
+    if (chkAutoGreet) {
+      chkAutoGreet.checked = headlessDisciples.autoGreetOnSelect;
+      chkAutoGreet.addEventListener("change", () => headlessDisciples.setAutoGreetOnSelect(chkAutoGreet.checked));
+    }
+    const inputGreetTpl = $("#atd-greet-template", panel);
+    if (inputGreetTpl) {
+      inputGreetTpl.value = headlessDisciples.greetTemplate;
+      inputGreetTpl.addEventListener("input", () => {
+        headlessDisciples.greetTemplate = inputGreetTpl.value;
+        localStorage.setItem("atd_headless_greet_tpl", inputGreetTpl.value);
+        const preview = $("#atd-greet-preview", panel);
+        if (preview) preview.textContent = `Xem trước: "${headlessDisciples.formatGreetingMessage()}"`;
       });
     }
 
@@ -5567,8 +5967,10 @@
         const val = inputHeadlessName.value.trim();
         headlessDisciples.customName = val;
         localStorage.setItem("atd_headless_name", val);
-        if (!headlessDisciples.enabled) {
-          headlessDisciples.updateUI();
+        const btn = $("#atd-btn-toggle-headless");
+        if (btn && !headlessDisciples.enabled) {
+          const displayName = headlessDisciples.customName || "Đệ tử ngầm";
+          btn.textContent = `⚡ Bật ${headlessDisciples.targetCount} ${displayName} (0 Tab)`;
         }
       };
       inputHeadlessName.addEventListener("change", handleNameChange);
@@ -5581,13 +5983,20 @@
         localStorage.setItem("atd_headless_autonumber", chkHeadlessAutonumber.checked ? "true" : "false");
       });
     }
+    const chkHeadlessRandomLook = $("#atd-headless-randomlook", panel);
+    if (chkHeadlessRandomLook) {
+      chkHeadlessRandomLook.checked = headlessDisciples.randomLook;
+      chkHeadlessRandomLook.addEventListener("change", () => {
+        headlessDisciples.setRandomLook(chkHeadlessRandomLook.checked);
+      });
+    }
     const inputHeadlessCount = $("#atd-headless-count-input", panel);
     if (inputHeadlessCount) {
       inputHeadlessCount.value = headlessDisciples.targetCount;
       const handleCountChange = () => {
         let val = parseInt(inputHeadlessCount.value, 10);
         if (isNaN(val) || val < 1) val = 1;
-        if (val > 100) val = 100;
+        if (val > 499) val = 499;
         inputHeadlessCount.value = val;
         localStorage.setItem("atd_headless_count", String(val));
         headlessDisciples.targetCount = val;
@@ -5600,7 +6009,7 @@
       inputHeadlessCount.addEventListener("change", handleCountChange);
       inputHeadlessCount.addEventListener("input", () => {
         let val = parseInt(inputHeadlessCount.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 100) {
+        if (!isNaN(val) && val >= 1 && val <= 499) {
           headlessDisciples.targetCount = val;
           localStorage.setItem("atd_headless_count", String(val));
           if (!headlessDisciples.enabled) {
@@ -5628,7 +6037,7 @@
         } else {
           let count = inputHeadlessCount ? parseInt(inputHeadlessCount.value, 10) : headlessDisciples.targetCount;
           if (isNaN(count) || count < 1) count = 1;
-          if (count > 100) count = 100;
+          if (count > 499) count = 499;
           headlessDisciples.start(count);
         }
       });
