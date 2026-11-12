@@ -295,8 +295,36 @@ function startRoaming() {
     d.lastStateSend = 0;
     // Tốc độ cá nhân hóa riêng biệt (từ 0.23m đến 0.41m / 200ms) để không đi ngang hàng nhau
     d.baseSpeed = 0.23 + ((idx * 7) % 10) * 0.02;
-    // Phân tầng độ cao khi khinh công (từ 2.0m đến 5.2m)
-    d.flyTier = 2.0 + ((idx * 11) % 7) * 0.5;
+    // Trần độ cao khinh công riêng cho từng đệ tử (2.2m - 4.7m)
+    d.maxAltitude = 2.2 + ((idx * 9) % 6) * 0.5;
+    d.takeoffSpeed = 0.14 + ((idx * 5) % 5) * 0.02;
+    d.landingSpeed = 0.10 + ((idx * 3) % 4) * 0.02;
+
+    // Khởi tạo trạng thái bay so le
+    if (!airWalk) {
+      d.flightState = "ground";
+      d.flightAltitude = 0;
+      d.flightTimer = 0;
+    } else {
+      const mod = idx % 4;
+      if (mod === 0) {
+        d.flightState = "ground";
+        d.flightAltitude = 0;
+        d.flightTimer = 35 + ((idx * 7) % 35);
+      } else if (mod === 1) {
+        d.flightState = "takeoff";
+        d.flightAltitude = Math.round((d.maxAltitude * 0.3) * 100) / 100;
+        d.flightTimer = 0;
+      } else if (mod === 2) {
+        d.flightState = "flying";
+        d.flightAltitude = d.maxAltitude;
+        d.flightTimer = 45 + ((idx * 11) % 45);
+      } else {
+        d.flightState = "landing";
+        d.flightAltitude = Math.round((d.maxAltitude * 0.7) * 100) / 100;
+        d.flightTimer = 0;
+      }
+    }
 
     // Phân tán rải rác các mục tiêu khác nhau
     const lm = MAP_LANDMARKS[(idx * 3 + Math.floor(Math.random() * 3)) % MAP_LANDMARKS.length];
@@ -316,22 +344,71 @@ function startRoaming() {
     disciples.forEach((d) => {
       if (!d.ready || !d.ws) return;
 
-      // Phân tầng độ cao khi khinh công kèm lượn sóng nhẹ
-      let altitude = 0;
+      // Chu kỳ Bay lên - Lượn trên không - Hạ xuống đất luân phiên (nếu bật khinh công)
       if (airWalk) {
-        const tier = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
-        const bob = Math.sin((now / 1400) + d.index * 1.5) * 0.25;
-        altitude = tier + bob;
+        if (!d.flightState) d.flightState = "ground";
+        if (d.maxAltitude == null) d.maxAltitude = 2.2 + ((d.index * 9) % 6) * 0.5;
+        if (d.takeoffSpeed == null) d.takeoffSpeed = 0.14 + ((d.index * 5) % 5) * 0.02;
+        if (d.landingSpeed == null) d.landingSpeed = 0.10 + ((d.index * 3) % 4) * 0.02;
+
+        if (d.flightState === "ground") {
+          d.flightAltitude = 0;
+          d.flightTimer = (d.flightTimer || 0) - 1;
+          // Đi dưới đất đủ lâu thì bắt đầu khinh công bay lên
+          if (d.flightTimer <= 0) {
+            d.flightState = "takeoff";
+          }
+        } else if (d.flightState === "takeoff") {
+          // Bay lên từ từ, êm ái
+          d.flightAltitude = (d.flightAltitude || 0) + d.takeoffSpeed;
+          if (d.flightAltitude >= d.maxAltitude) {
+            d.flightAltitude = d.maxAltitude;
+            d.flightState = "flying";
+            d.flightTimer = 50 + ((d.index * 13) % 50);
+          }
+        } else if (d.flightState === "flying") {
+          // Lượn sóng nhẹ bồng bềnh
+          const bob = Math.sin((now / 1500) + d.index * 1.5) * 0.2;
+          d.flightAltitude = Math.round((d.maxAltitude + bob) * 100) / 100;
+          d.flightTimer = (d.flightTimer || 0) - 1;
+          if (d.flightTimer <= 0) {
+            d.flightState = "landing";
+          }
+        } else if (d.flightState === "landing") {
+          // Từ từ hạ cánh xuống mặt đất
+          d.flightAltitude = (d.flightAltitude || 0) - d.landingSpeed;
+          // Khi chạm đất: chuyển sang đi bộ tiếp đất, tuyệt đối không bao giờ âm (chống độn thổ)
+          if (d.flightAltitude <= 0) {
+            d.flightAltitude = 0;
+            d.flightState = "ground";
+            d.flightTimer = 40 + ((d.index * 11) % 50);
+          }
+        }
+      } else {
+        d.flightState = "ground";
+        d.flightAltitude = 0;
       }
 
-      if (!d.pos) d.pos = { x: d.offset.x, y: Math.round((2.4 + altitude) * 100) / 100, z: d.offset.z, ry: Math.PI };
+      // Safe altitude >= 0
+      const safeAlt = Math.max(0, d.flightAltitude || 0);
+
+      if (!d.pos) {
+        const initG = getGroundY(d.offset.x, d.offset.z);
+        d.pos = {
+          x: d.offset.x,
+          y: Math.max(initG, Math.round((initG + safeAlt) * 100) / 100),
+          z: d.offset.z,
+          ry: Math.PI
+        };
+      }
 
       // Nghỉ chân tại chỗ: chỉ gửi keepalive mỗi 2.5s để tiết kiệm đường truyền
       if (d.idleTimer > 0) {
         d.idleTimer--;
         if (!d.lastStateSend || now - d.lastStateSend > 2500) {
           d.lastStateSend = now;
-          d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
+          const curG = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.max(curG, Math.round((curG + safeAlt) * 100) / 100);
           d.send({
             t: "state",
             x: d.pos.x,
@@ -364,7 +441,8 @@ function startRoaming() {
       if (dist < 1.5) {
         d.idleTimer = 10 + Math.floor(Math.random() * 15) + ((d.index * 5) % 10);
         d.targetWaypoint = null;
-        d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
+        const curG = getGroundY(d.pos.x, d.pos.z);
+        d.pos.y = Math.max(curG, Math.round((curG + safeAlt) * 100) / 100);
         d.lastStateSend = now;
         d.send({
           t: "state",
@@ -384,7 +462,9 @@ function startRoaming() {
       const moveZ = (dz / dist) * Math.min(stepDist, dist);
       d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
       d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
-      d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
+      const moveGroundY = getGroundY(d.pos.x, d.pos.z);
+      // TUYỆT ĐỐI KHÔNG ĐỘN THỔ: luôn >= moveGroundY
+      d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
       d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
       d.lastStateSend = now;
 
@@ -415,6 +495,8 @@ function recallToHall() {
   disciples.forEach((d) => {
     d.idleTimer = 0;
     d.targetWaypoint = null;
+    d.flightState = "ground";
+    d.flightAltitude = 0;
     d.enterChanhDien();
   });
 }
@@ -530,8 +612,15 @@ rl.on("line", (line) => {
     console.log(`\x1b[32m[ĐỔI TÊN] Đã cập nhật tên đệ tử thành: ${customName || "Đệ tử ngầm (mặc định)"}\x1b[0m`);
   } else if (cmd === "air" || cmd === "fly" || cmd === "khinhcong") {
     airWalk = !airWalk;
-    console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (phân tầng chênh lệch độ cao)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
-    disciples.forEach((d) => {
+    console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (chu kỳ tự bay lên & lượn xuống mặt đất không độn thổ)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
+    disciples.forEach((d, idx) => {
+      if (!airWalk) {
+        d.flightState = "ground";
+        d.flightAltitude = 0;
+      } else if (!d.flightState || d.flightState === "ground") {
+        d.flightState = (idx % 2 === 0) ? "takeoff" : "ground";
+        d.flightTimer = 30 + ((idx * 9) % 30);
+      }
       if (d.pos) {
         let altitude = 0;
         if (airWalk) {
@@ -540,11 +629,12 @@ rl.on("line", (line) => {
             const col = (d.index - 1) % 6;
             altitude = 2.0 + (row * 0.7) + ((col % 3) * 0.25);
           } else {
-            altitude = d.flyTier || (2.0 + ((d.index * 11) % 7) * 0.5);
+            altitude = Math.max(0, d.flightAltitude || 0);
           }
         }
         const baseY = (formationMode === "hall") ? 2.4 : getGroundY(d.pos.x, d.pos.z);
-        d.pos.y = Math.round((baseY + altitude) * 100) / 100;
+        // Tuyệt đối không độn thổ: d.pos.y luôn >= baseY
+        d.pos.y = Math.max(baseY, Math.round((baseY + altitude) * 100) / 100);
         d.send({
           t: "state",
           x: d.pos.x,
