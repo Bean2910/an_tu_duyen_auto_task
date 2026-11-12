@@ -262,17 +262,19 @@
     constructor() {
       this.disciples = [];
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
-      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
+      this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(29, savedCount);
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
+      this.spawnTimers = [];
+      this.reconnectTimers = [];
     }
 
     getOffsetForIndex(index) {
-      const cols = 8;
+      const cols = 6;
       const col = (index - 1) % cols;
       const row = Math.floor((index - 1) / cols);
-      const xStart = -4.2;
+      const xStart = -3.0;
       const xSpacing = 1.2;
       return {
         x: Math.round((xStart + col * xSpacing) * 100) / 100,
@@ -280,11 +282,18 @@
       };
     }
 
+    clearPendingTimers() {
+      this.spawnTimers.forEach(clearTimeout);
+      this.spawnTimers = [];
+      this.reconnectTimers.forEach(clearTimeout);
+      this.reconnectTimers = [];
+    }
+
     start(count) {
-      if (typeof count === "number" && !isNaN(count) && count >= 1 && count <= 100) {
-        this.targetCount = count;
+      if (typeof count === "number" && !isNaN(count) && count >= 1) {
+        this.targetCount = Math.min(29, Math.max(1, count));
       }
-      this.stop(false);
+      this.stop(true);
       this.enabled = true;
       const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
       log(`⚡ Đang kết nối ${this.targetCount} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
@@ -295,9 +304,10 @@
         if (delay === 0) {
           this.spawnDisciple(i, curRoom);
         } else {
-          setTimeout(() => {
+          const st = setTimeout(() => {
             if (this.enabled) this.spawnDisciple(i, curRoom);
           }, delay);
+          this.spawnTimers.push(st);
         }
       }
 
@@ -307,7 +317,9 @@
     }
 
     spawnDisciple(index, room) {
-      if (!this.enabled) return;
+      if (!this.enabled || this.disciples.length >= this.targetCount) return;
+      if (this.disciples.some((d) => d.index === index)) return;
+
       const cid = generateStandardUUID();
       const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
       let ws;
@@ -385,12 +397,15 @@
         this.updateUI();
         updateSwarmInfoUI();
         if (this.enabled) {
-          setTimeout(() => {
+          const rt = setTimeout(() => {
             if (this.enabled) {
               this.disciples = this.disciples.filter((d) => d !== disciple);
-              this.spawnDisciple(index, room);
+              if (this.disciples.length < this.targetCount) {
+                this.spawnDisciple(index, room);
+              }
             }
           }, 3000);
+          this.reconnectTimers.push(rt);
         }
       };
 
@@ -469,6 +484,7 @@
 
     stop(silent = false) {
       this.enabled = false;
+      this.clearPendingTimers();
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       if (this.refreshTimer) clearInterval(this.refreshTimer);
       this.heartbeatTimer = null;
@@ -476,6 +492,7 @@
 
       this.disciples.forEach((d) => {
         if (d.ws) {
+          d.ws.onopen = d.ws.onmessage = d.ws.onclose = d.ws.onerror = null;
           try { d.ws.close(); } catch {}
         }
       });
@@ -501,7 +518,7 @@
       const statusEl = $("#atd-headless-status");
       const input = $("#atd-headless-count-input");
       const readyCount = this.getActiveCount();
-      const total = this.getTotalCount();
+      const targetNum = this.targetCount;
 
       if (input && document.activeElement !== input) {
         input.value = this.targetCount;
@@ -514,7 +531,7 @@
 
       if (btn) {
         if (this.enabled) {
-          btn.textContent = `⏹ Tắt ${total} Đệ tử ngầm`;
+          btn.textContent = `⏹ Tắt ${targetNum} Đệ tử ngầm`;
           btn.classList.remove("highlight");
           btn.classList.add("danger");
         } else {
@@ -4332,15 +4349,18 @@
                   <span>👥 Số lượng đệ tử:</span>
                 </div>
                 <div class="atd-headless-input-ctrl">
-                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
+                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="29" value="4" title="Số lượng đệ tử ngầm (tối đa 29 đệ tử/tab theo giới hạn IP của server chùa)" />
                   <div class="atd-headless-presets">
-                    <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn nhanh 4 đệ tử (chuẩn Đồng Tâm x5)">4</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn nhanh 10 đệ tử">10</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn nhanh 20 đệ tử">20</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn nhanh 50 đệ tử">50</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn nhanh 100 đệ tử (Đại tăng đoàn)">100</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="2" title="Chọn 2 đệ tử">2</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn 4 đệ tử (Chuẩn ăn trọn x5 Đồng Tâm +9 công đức)">4 ⭐</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn 10 đệ tử">10</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn 20 đệ tử">20</button>
+                    <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Mức tối đa IP cho phép)">29 Max</button>
                   </div>
                 </div>
+              </div>
+              <div class="atd-clone-tip" style="margin:2px 0 6px 0; font-size:9.5px; color:#e5bc72; line-height:1.35;">
+                💡 <b>Mẹo công đức:</b> Server chỉ tính thưởng tối đa <b>3 người lạy cùng (+9 công đức/lần)</b>. Chỉ cần <b>4 đệ tử</b> là bạn đã nhận trọn vẹn điểm thưởng tối đa của game! Máy chủ giới hạn kịch trần 30 kết nối/IP (1 tab chính + 29 đệ tử).
               </div>
               <div class="atd-clone-btns">
                 <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
@@ -4565,7 +4585,7 @@
       const handleCountChange = () => {
         let val = parseInt(inputHeadlessCount.value, 10);
         if (isNaN(val) || val < 1) val = 1;
-        if (val > 100) val = 100;
+        if (val > 29) val = 29;
         inputHeadlessCount.value = val;
         localStorage.setItem("atd_headless_count", String(val));
         headlessDisciples.targetCount = val;
@@ -4578,7 +4598,7 @@
       inputHeadlessCount.addEventListener("change", handleCountChange);
       inputHeadlessCount.addEventListener("input", () => {
         let val = parseInt(inputHeadlessCount.value, 10);
-        if (!isNaN(val) && val >= 1 && val <= 100) {
+        if (!isNaN(val) && val >= 1 && val <= 29) {
           headlessDisciples.targetCount = val;
           localStorage.setItem("atd_headless_count", String(val));
           if (!headlessDisciples.enabled) {
@@ -4606,7 +4626,7 @@
         } else {
           let count = inputHeadlessCount ? parseInt(inputHeadlessCount.value, 10) : headlessDisciples.targetCount;
           if (isNaN(count) || count < 1) count = 1;
-          if (count > 100) count = 100;
+          if (count > 29) count = 29;
           headlessDisciples.start(count);
         }
       });

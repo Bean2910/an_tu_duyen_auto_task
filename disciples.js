@@ -125,7 +125,7 @@ class Disciple {
         } else if (msg.t === "room") {
           this.room = msg.room;
         }
-      } catch {}
+      } catch { }
     };
 
     this.ws.onclose = () => {
@@ -148,7 +148,7 @@ class Disciple {
       try {
         this.ws.send(JSON.stringify(obj));
         return true;
-      } catch {}
+      } catch { }
     }
     return false;
   }
@@ -215,7 +215,7 @@ class Disciple {
     this.stopped = true;
     this.cleanupTimers();
     if (this.ws) {
-      try { this.ws.close(); } catch {}
+      try { this.ws.close(); } catch { }
     }
   }
 
