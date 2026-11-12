@@ -257,15 +257,35 @@
     return triggerDirectBow(true);
   }
 
+  // --- DANH SÁCH TỌA ĐỘ VÀ KHU VỰC TRÊN BẢN ĐỒ CHÙA (ĐỂ ĐỆ TỬ ĐI DẠO TỰ DO) ---
+  const MAP_LANDMARKS = [
+    { name: "Sân chùa", zone: "Sân chùa", x: 0, y: 0, z: 40, radius: 14 },
+    { name: "Cổng tam quan", zone: "Cổng tam quan", x: 0, y: 0.3, z: 140, radius: 10 },
+    { name: "Đường thần đạo", zone: "Đường thần đạo", x: 0, y: 0.2, z: 90, radius: 8 },
+    { name: "Vườn hoa", zone: "Vườn hoa", x: 9.6, y: 0, z: 75.75, radius: 12 },
+    { name: "Bãi chăn trâu", zone: "Sân chùa", x: -21, y: 0, z: 111, radius: 10 },
+    { name: "Vườn Linh Thú", zone: "Vườn Linh Thú", x: -39, y: 0, z: 81, radius: 12 },
+    { name: "Hồ sen · Cầu Duyên", zone: "Hồ sen · Cầu Duyên", x: 35.5, y: 0, z: 12, radius: 8 },
+    { name: "Rùa thần", zone: "Hồ sen · Cầu Duyên", x: 34.8, y: 0, z: 21.5, radius: 6 },
+    { name: "Vườn thiền", zone: "Vườn thiền", x: -36, y: 0, z: 30, radius: 10 },
+    { name: "Pháp đường", zone: "Sân chùa", x: -40.5, y: 0, z: 4, radius: 8 },
+    { name: "Giếng Ngọc", zone: "Giếng Ngọc", x: -44, y: 0, z: -16, radius: 8 },
+    { name: "Tượng Di Lặc", zone: "Tượng Di Lặc", x: 46, y: 0, z: -32, radius: 10 },
+    { name: "Đền Nguyệt Lão", zone: "Hồ sen · Cầu Duyên", x: 50, y: 0, z: -12.5, radius: 8 },
+    { name: "Bảo tháp", zone: "Bảo tháp", x: 0, y: 4.6, z: -50, radius: 10 }
+  ];
+
   // --- QUẢN LÝ ĐỆ TỬ NGẦM (HEADLESS DISCIPLES) CHẠY NGAY TRONG TAB CHÍNH (0 TAB - 0% GPU) ---
   class HeadlessDiscipleManager {
     constructor() {
       this.disciples = [];
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
       this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
+      this.formationMode = localStorage.getItem("atd_headless_mode") || "hall"; // "hall" | "roam"
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
+      this.roamInterval = null;
       this.spawnTimers = [];
       this.reconnectTimers = [];
     }
@@ -312,6 +332,9 @@
       }
 
       this.startTimers();
+      if (this.formationMode === "roam") {
+        this.startRoaming(true);
+      }
       this.updateUI();
       updateSwarmInfoUI();
     }
@@ -381,8 +404,19 @@
             disciple.myId = msg.id;
             disciple.myPid = msg.pid;
             disciple.ready = true;
-            this.sendToHall(disciple);
-            log(`⚡ [Đệ tử ngầm #${index}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
+            if (this.formationMode === "roam") {
+              const lm = MAP_LANDMARKS[(index - 1) % MAP_LANDMARKS.length];
+              disciple.pos = { x: lm.x, y: lm.y, z: lm.z, ry: 0 };
+              disciple.currentZone = lm.zone;
+              try {
+                disciple.ws.send(JSON.stringify({ t: "visit", zone: lm.zone }));
+                disciple.ws.send(JSON.stringify({ t: "state", x: lm.x, y: lm.y, z: lm.z, ry: 0, s: 0 }));
+              } catch {}
+              log(`⚡ [Đệ tử ngầm #${index}] Đã vào chùa và đi dạo tại [${lm.name}] (ID: ${disciple.myId})`, "ok");
+            } else {
+              this.sendToHall(disciple);
+              log(`⚡ [Đệ tử ngầm #${index}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
+            }
             this.updateUI();
             updateSwarmInfoUI();
           } else if (msg.t === "room") {
@@ -454,12 +488,143 @@
 
       this.refreshTimer = setInterval(() => {
         if (!this.enabled) return;
-        this.disciples.forEach((d) => {
-          if (d.ready) {
-            this.sendToHall(d);
-          }
-        });
+        if (this.formationMode === "hall") {
+          this.disciples.forEach((d) => {
+            if (d.ready) {
+              this.sendToHall(d);
+            }
+          });
+        }
       }, 15000);
+    }
+
+    startRoaming(silent = false) {
+      this.formationMode = "roam";
+      localStorage.setItem("atd_headless_mode", "roam");
+      if (!silent) {
+        log("🏃 Đã kích hoạt Chế độ Đi dạo: Đệ tử bắt đầu tản ra đi lại tự do khắp các nẻo đường trong chùa!", "info");
+      }
+
+      this.disciples.forEach((d, idx) => {
+        d.idleTimer = 0;
+        const lm = MAP_LANDMARKS[(idx + Math.floor(Math.random() * MAP_LANDMARKS.length)) % MAP_LANDMARKS.length];
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * lm.radius;
+        d.targetWaypoint = {
+          x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
+          y: lm.y,
+          z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
+          zone: lm.zone
+        };
+      });
+
+      if (this.roamInterval) clearInterval(this.roamInterval);
+      this.roamInterval = setInterval(() => {
+        if (!this.enabled || this.formationMode !== "roam") return;
+        this.stepRoaming();
+      }, 1200);
+
+      this.updateUI();
+    }
+
+    stepRoaming() {
+      this.disciples.forEach((d) => {
+        if (!d.ready || !d.ws || d.ws.readyState !== WebSocket.OPEN) return;
+
+        if (!d.pos) {
+          d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+        }
+
+        if (d.idleTimer > 0) {
+          d.idleTimer--;
+          try {
+            d.ws.send(JSON.stringify({
+              t: "state",
+              x: d.pos.x,
+              y: d.pos.y,
+              z: d.pos.z,
+              ry: d.pos.ry,
+              s: d.idleTimer > 1 ? 0 : 2
+            }));
+          } catch {}
+          return;
+        }
+
+        if (!d.targetWaypoint) {
+          const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
+          const angle = Math.random() * Math.PI * 2;
+          const radius = Math.random() * lm.radius;
+          d.targetWaypoint = {
+            x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
+            y: lm.y,
+            z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
+            zone: lm.zone
+          };
+        }
+
+        const dx = d.targetWaypoint.x - d.pos.x;
+        const dz = d.targetWaypoint.z - d.pos.z;
+        const dist = Math.hypot(dx, dz);
+
+        if (dist < 2.5) {
+          d.idleTimer = Math.floor(Math.random() * 3) + 2;
+          const lm = MAP_LANDMARKS[Math.floor(Math.random() * MAP_LANDMARKS.length)];
+          const angle = Math.random() * Math.PI * 2;
+          const radius = Math.random() * lm.radius;
+          d.targetWaypoint = {
+            x: Math.round((lm.x + Math.cos(angle) * radius) * 100) / 100,
+            y: lm.y,
+            z: Math.round((lm.z + Math.sin(angle) * radius) * 100) / 100,
+            zone: lm.zone
+          };
+          return;
+        }
+
+        const stepDist = 1.4 + Math.random() * 0.8;
+        const moveX = (dx / dist) * Math.min(stepDist, dist);
+        const moveZ = (dz / dist) * Math.min(stepDist, dist);
+        d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
+        d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
+        d.pos.y = d.targetWaypoint.y;
+        d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
+
+        if (d.currentZone !== d.targetWaypoint.zone) {
+          d.currentZone = d.targetWaypoint.zone;
+          try {
+            d.ws.send(JSON.stringify({ t: "visit", zone: d.targetWaypoint.zone }));
+          } catch {}
+        }
+
+        try {
+          d.ws.send(JSON.stringify({
+            t: "state",
+            x: d.pos.x,
+            y: d.pos.y,
+            z: d.pos.z,
+            ry: d.pos.ry,
+            s: 1
+          }));
+        } catch {}
+      });
+    }
+
+    recallToHall() {
+      this.formationMode = "hall";
+      localStorage.setItem("atd_headless_mode", "hall");
+      if (this.roamInterval) clearInterval(this.roamInterval);
+      this.roamInterval = null;
+
+      log("🏛️ Đã triệu tập toàn bộ đệ tử về Chánh điện xếp hàng trang nghiêm!", "ok");
+
+      this.disciples.forEach((d) => {
+        d.idleTimer = 0;
+        d.targetWaypoint = null;
+        d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+        d.currentZone = "Chánh điện";
+        this.sendToHall(d);
+      });
+
+      this.updateUI();
     }
 
     syncRoom(newRoom) {
@@ -495,8 +660,10 @@
       this.clearPendingTimers();
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       if (this.refreshTimer) clearInterval(this.refreshTimer);
+      if (this.roamInterval) clearInterval(this.roamInterval);
       this.heartbeatTimer = null;
       this.refreshTimer = null;
+      this.roamInterval = null;
 
       this.disciples.forEach((d) => {
         if (d.ws) {
@@ -525,8 +692,25 @@
       const btn = $("#atd-btn-toggle-headless");
       const statusEl = $("#atd-headless-status");
       const input = $("#atd-headless-count-input");
+      const navPill = $("#atd-nav-disciple-count");
+      const btnHall = $("#atd-btn-mode-hall");
+      const btnRoam = $("#atd-btn-mode-roam");
+      const modeBadge = $("#atd-disciple-mode-badge");
+
       const readyCount = this.getActiveCount();
       const targetNum = this.targetCount;
+
+      if (navPill) {
+        navPill.textContent = this.enabled ? readyCount : 0;
+        navPill.classList.toggle("on", this.enabled && readyCount > 0);
+      }
+
+      if (btnHall) btnHall.classList.toggle("active", this.formationMode === "hall");
+      if (btnRoam) btnRoam.classList.toggle("active", this.formationMode === "roam");
+      if (modeBadge) {
+        modeBadge.textContent = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : "🏃 Đi dạo tự do khắp chùa";
+        modeBadge.style.color = this.formationMode === "hall" ? "#e5bc72" : "#38bdf8";
+      }
 
       if (input && document.activeElement !== input) {
         input.value = this.targetCount;
@@ -560,11 +744,12 @@
       if (statusEl) {
         if (this.enabled) {
           statusEl.style.display = "block";
+          const modeDesc = this.formationMode === "roam" ? "đang tản ra đi dạo khắp chùa" : "đang túc trực trong Chánh điện";
           if (readyCount >= this.targetCount) {
-            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ngầm</b> đang túc trực trong Chánh điện · 0 tab · 0% GPU`;
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ngầm</b> ${modeDesc} · 0 tab · 0% GPU`;
             statusEl.style.color = "#34d399";
           } else if (readyCount >= 29 && this.targetCount > 29) {
-            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử sẵn sàng</b> · <span style="color:#f59e0b;">(Máy chủ kịch trần 30 kết nối/IP: 1 tab chính + 29 đệ tử)</span>`;
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ${modeDesc}</b> · <span style="color:#f59e0b;">(Máy chủ kịch trần 30 kết nối/IP: 1 tab chính + 29 đệ tử)</span>`;
             statusEl.style.color = "#38bdf8";
           } else {
             statusEl.innerHTML = `⏳ Đang kết nối đệ tử ngầm (${readyCount}/${this.targetCount})…`;
@@ -603,6 +788,13 @@
 
     isCoordinatingBow = true;
     syncChanhDienStateToServer();
+
+    if (headlessDisciples && headlessDisciples.enabled && headlessDisciples.formationMode === "roam") {
+      log("🏛️ [Chủ trì] Triệu tập đệ tử từ khắp bản đồ về Chánh điện xếp hàng để lạy...", "step");
+      headlessDisciples.recallToHall();
+      await sleep(350);
+    }
+
     const sessionId = "bow_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const followerCount = getSwarmFollowerCount();
     const headlessCount = headlessDisciples ? headlessDisciples.getActiveCount() : 0;
@@ -4271,156 +4463,262 @@
         </div>
         <button id="atd-min" title="Thu gọn bảng điều khiển" aria-label="Thu gọn">−</button>
       </div>
+
+      <!-- THANH CHUYỂN MENU CHÍNH -->
+      <div class="atd-main-nav" id="atd-main-nav">
+        <button type="button" class="atd-nav-btn active" data-view="tasks" id="atd-nav-btn-tasks">
+          📋 Tự Động & Tác Vụ
+        </button>
+        <button type="button" class="atd-nav-btn" data-view="disciples" id="atd-nav-btn-disciples">
+          👥 Quản Lý Đệ Tử <span id="atd-nav-disciple-count" class="atd-nav-pill">0</span>
+        </button>
+      </div>
+
       <div id="atd-body">
-        <div class="atd-status">
-          <span class="atd-status-dot" id="atd-status-dot"></span>
-          <span id="atd-status">Sẵn sàng · bấm Chạy để tự động thực hiện</span>
-        </div>
-        <div class="atd-config">
-          <div class="atd-config-head">
-            <span class="atd-config-title">Tác vụ tự động <span id="atd-task-count">(${enabledTasks.size}/${ALL_TASKS.length})</span></span>
-            <div class="atd-mini-btns">
-              <button id="atd-all" type="button" title="Bật tất cả tác vụ trong tab này">Chọn hết</button>
-              <button id="atd-clear" type="button" title="Bỏ chọn các tác vụ trong tab này">Bỏ chọn</button>
-              <button id="atd-farm" type="button" title="Chỉ bật Mõ & Chuỗi hạt">Chỉ Mõ/Hạt</button>
-            </div>
+        <!-- VIEW 1: TỰ ĐỘNG & TÁC VỤ -->
+        <div id="atd-view-tasks" class="atd-view-pane">
+          <div class="atd-status">
+            <span class="atd-status-dot" id="atd-status-dot"></span>
+            <span id="atd-status">Sẵn sàng · bấm Chạy để tự động thực hiện</span>
           </div>
-          <div class="atd-tab-bar" id="atd-task-tabs">
-            ${TASK_CATEGORIES.map(
-              (cat) =>
-                `<button type="button" class="atd-task-tab ${cat.id === "all" ? "active" : ""}" data-tab="${cat.id}">${cat.label} <span class="atd-tab-count" data-tab-count="${cat.id}"></span></button>`
-            ).join("")}
-          </div>
-          <div class="atd-tags">
-            ${ALL_TASKS.map(
-              (t) =>
-                `<button type="button" class="atd-tag on" data-task="${t.id}" data-category="${t.category}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}">${t.label}</button>`
-            ).join("")}
-          </div>
-          <div class="atd-opts">
-            <label class="atd-switch-row">
-              <span class="atd-switch">
-                <input type="checkbox" id="atd-loop" checked>
-                <span class="atd-slider"></span>
-              </span>
-              <span>Tự động lặp (Mõ, Hạt, Hương, Đồng tâm, Thưởng)</span>
-            </label>
-            <label class="atd-switch-row">
-              <span class="atd-switch">
-                <input type="checkbox" id="atd-khoe">
-                <span class="atd-slider"></span>
-              </span>
-              <span>Kèm lưu ảnh Thời khóa ({ t: "khoe" })</span>
-            </label>
-            <label class="atd-switch-row">
-              <span class="atd-switch">
-                <input type="checkbox" id="atd-dongtam" checked>
-                <span class="atd-slider"></span>
-              </span>
-              <span>Bắt nhịp Lạy đồng tâm & Swarm đa tab</span>
-            </label>
-            <div class="atd-peers-row">
-              <div class="atd-peers-label">
-                <span>Canh lạy cùng lúc:</span>
-                <small id="atd-dt-status">Mục tiêu: ≥${minPeersToBow} người</small>
-              </div>
-              <div class="atd-peers-ctrl">
-                <div class="atd-mini-btns" id="atd-dongtam-targets">
-                  <button type="button" class="atd-dt-opt ${minPeersToBow === 1 ? 'on' : ''}" data-target="1" title="≥1 người (bất kỳ ai lạy là theo ngay)">1</button>
-                  <button type="button" class="atd-dt-opt ${minPeersToBow === 2 ? 'on' : ''}" data-target="2" title="≥2 người cùng lạy">2</button>
-                  <button type="button" class="atd-dt-opt ${minPeersToBow === 3 ? 'on' : ''}" data-target="3" title="≥3 người cùng lạy">3</button>
-                  <button type="button" class="atd-dt-opt ${minPeersToBow === 5 ? 'on' : ''}" data-target="5" title="≥5 người cùng lạy">5</button>
-                </div>
-                <div class="atd-num-stepper" title="Tùy chỉnh số lượng người canh lạy cùng lúc">
-                  <button type="button" id="atd-dt-dec" title="Giảm 1 người">−</button>
-                  <input type="number" id="atd-dt-input" min="1" max="99" value="${minPeersToBow}" title="Nhập số người cần canh lạy cùng lúc">
-                  <button type="button" id="atd-dt-inc" title="Tăng 1 người">+</button>
-                </div>
+          <div class="atd-config">
+            <div class="atd-config-head">
+              <span class="atd-config-title">Tác vụ tự động <span id="atd-task-count">(${enabledTasks.size}/${ALL_TASKS.length})</span></span>
+              <div class="atd-mini-btns">
+                <button id="atd-all" type="button" title="Bật tất cả tác vụ trong tab này">Chọn hết</button>
+                <button id="atd-clear" type="button" title="Bỏ chọn các tác vụ trong tab này">Bỏ chọn</button>
+                <button id="atd-farm" type="button" title="Chỉ bật Mõ & Chuỗi hạt">Chỉ Mõ/Hạt</button>
               </div>
             </div>
-            <div class="atd-swarm-role-box" id="atd-swarm-role-box">
-              <div class="atd-role-header">
-                <span>👑 <b>Vai trò Tab trong Swarm</b>:</span>
-                <span class="atd-role-badge ${swarmRole}" id="atd-role-badge">
-                  ${swarmRole === 'master' ? '👑 Chủ trì (Master)' : '🤝 Trợ lực (Follower)'}
+            <div class="atd-tab-bar" id="atd-task-tabs">
+              ${TASK_CATEGORIES.map(
+                (cat) =>
+                  `<button type="button" class="atd-task-tab ${cat.id === "all" ? "active" : ""}" data-tab="${cat.id}">${cat.label} <span class="atd-tab-count" data-tab-count="${cat.id}"></span></button>`
+              ).join("")}
+            </div>
+            <div class="atd-tags">
+              ${ALL_TASKS.map(
+                (t) =>
+                  `<button type="button" class="atd-tag on" data-task="${t.id}" data-category="${t.category}" title="${t.once ? "Chạy 1 lần rồi bỏ qua ở các vòng lặp sau" : "Lặp lại mỗi chu kỳ"}">${t.label}</button>`
+              ).join("")}
+            </div>
+            <div class="atd-opts">
+              <label class="atd-switch-row">
+                <span class="atd-switch">
+                  <input type="checkbox" id="atd-loop" checked>
+                  <span class="atd-slider"></span>
                 </span>
-              </div>
-              <div class="atd-role-selector">
-                <button type="button" class="atd-role-chip ${swarmRole === 'master' ? 'active' : ''}" id="atd-role-btn-master" title="Đặt tab này làm Tab Chính (Nhạc trưởng). Khi tab này lạy, toàn bộ các tab khác sẽ lạy theo!">
-                  👑 Tab Chủ trì (Master)
-                </button>
-                <button type="button" class="atd-role-chip ${swarmRole === 'follower' ? 'active' : ''}" id="atd-role-btn-follower" title="Đặt tab này làm Tab Trợ lực. Tab này sẽ túc trực ở Chánh điện và tuân lệnh lạy từ Tab Chủ trì!">
-                  🤝 Tab Trợ lực (Follower)
-                </button>
-              </div>
-              <div class="atd-swarm-status-bar" id="atd-swarm-status-bar"></div>
-            </div>
-            <div class="atd-clone-ctrl-box" id="atd-clone-ctrl-box">
-              <div class="atd-clone-title">
-                <span>⚡ <b>Đệ tử ngầm (0 Tab · Cực nhẹ · Không lag)</b>:</span>
-                <span id="atd-headless-badge" class="atd-headless-badge off">Chưa bật</span>
-              </div>
-              <div class="atd-clone-desc">
-                Kết nối đệ tử ngầm vào Chánh điện ngay trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
-              </div>
-              <div class="atd-headless-input-row">
-                <div class="atd-headless-input-label">
-                  <span>👥 Số lượng đệ tử:</span>
+                <span>Tự động lặp (Mõ, Hạt, Hương, Đồng tâm, Thưởng)</span>
+              </label>
+              <label class="atd-switch-row">
+                <span class="atd-switch">
+                  <input type="checkbox" id="atd-khoe">
+                  <span class="atd-slider"></span>
+                </span>
+                <span>Kèm lưu ảnh Thời khóa ({ t: "khoe" })</span>
+              </label>
+              <label class="atd-switch-row">
+                <span class="atd-switch">
+                  <input type="checkbox" id="atd-dongtam" checked>
+                  <span class="atd-slider"></span>
+                </span>
+                <span>Bắt nhịp Lạy đồng tâm & Swarm đa tab</span>
+              </label>
+              <div class="atd-peers-row">
+                <div class="atd-peers-label">
+                  <span>Canh lạy cùng lúc:</span>
+                  <small id="atd-dt-status">Mục tiêu: ≥${minPeersToBow} người</small>
                 </div>
-                <div class="atd-headless-input-ctrl">
-                  <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
-                  <div class="atd-headless-presets">
-                    <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn 4 đệ tử (Chuẩn ăn trọn x5 Đồng Tâm +9 công đức)">4 ⭐</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn 10 đệ tử">10</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn 20 đệ tử">20</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Mức tối đa trên 1 IP mạng / WiFi)">29 (Trần IP)</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn 50 đệ tử (Đại tăng đoàn)">50</button>
-                    <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn 100 đệ tử (Trăm đệ tử trợ duyên)">100</button>
+                <div class="atd-peers-ctrl">
+                  <div class="atd-mini-btns" id="atd-dongtam-targets">
+                    <button type="button" class="atd-dt-opt ${minPeersToBow === 1 ? 'on' : ''}" data-target="1" title="≥1 người (bất kỳ ai lạy là theo ngay)">1</button>
+                    <button type="button" class="atd-dt-opt ${minPeersToBow === 2 ? 'on' : ''}" data-target="2" title="≥2 người cùng lạy">2</button>
+                    <button type="button" class="atd-dt-opt ${minPeersToBow === 3 ? 'on' : ''}" data-target="3" title="≥3 người cùng lạy">3</button>
+                    <button type="button" class="atd-dt-opt ${minPeersToBow === 5 ? 'on' : ''}" data-target="5" title="≥5 người cùng lạy">5</button>
+                  </div>
+                  <div class="atd-num-stepper" title="Tùy chỉnh số lượng người canh lạy cùng lúc">
+                    <button type="button" id="atd-dt-dec" title="Giảm 1 người">−</button>
+                    <input type="number" id="atd-dt-input" min="1" max="99" value="${minPeersToBow}" title="Nhập số người cần canh lạy cùng lúc">
+                    <button type="button" id="atd-dt-inc" title="Tăng 1 người">+</button>
                   </div>
                 </div>
               </div>
-              <div class="atd-clone-tip" style="margin:2px 0 6px 0; font-size:9.5px; color:#e5bc72; line-height:1.35;">
-                💡 <b>Mẹo công đức:</b> Server chỉ tính thưởng tối đa <b>3 người lạy cùng (+9 công đức/lần)</b>. Chỉ cần <b>4 đệ tử</b> là nhận trọn vẹn điểm thưởng kịch kim! Máy chủ giới hạn 30 kết nối/IP (1 tab chính + 29 đệ tử trên cùng 1 mạng WiFi).
+
+              <div class="atd-hac-quick-box atd-quiz-quick-box" id="atd-quiz-quick-box">
+                <div class="atd-hac-title">
+                  <span>🪷 <b>Đố vui Phật pháp</b> (Bỏ qua lố giờ):</span>
+                </div>
+                <div class="atd-hac-btns">
+                  <button type="button" class="atd-hac-btn" id="atd-btn-quiz-open" title="Mở bảng Đố vui Phật pháp">
+                    🪷 Đố vui
+                  </button>
+                  <button type="button" class="atd-hac-btn" id="atd-btn-quiz-join" title="Tham gia ngay phiên Đố vui Phật pháp 10 câu (Mở ngoài giờ 20:00, kèm gợi ý đáp án đúng)">
+                    🎯 Tham gia
+                  </button>
+                  <button type="button" class="atd-hac-btn ghost" id="atd-btn-quiz-auto" title="Mở và tự động giải đúng 10/10 câu Đố vui Phật pháp">
+                    🤖 Tự giải
+                  </button>
+                </div>
               </div>
+              <div class="atd-hac-quick-box" id="atd-hac-quick-box">
+                <div class="atd-hac-title">
+                  <span>🦅 <b>Cưỡi Hạc trắng</b> (Bỏ qua lố giờ):</span>
+                </div>
+                <div class="atd-hac-btns">
+                  <button type="button" class="atd-hac-btn" id="atd-btn-hac-tron" title="Hạc đưa bạn bay 1 vòng lớn quanh chùa (~1.5 phút)">
+                    🦅 Ngắm chùa (~1.5p)
+                  </button>
+                  <button type="button" class="atd-hac-btn ghost" id="atd-btn-hac-dua" title="Hạc đưa bạn từ hồ bay qua cổng lên sân chùa (~15s)">
+                    🛫 Lên chùa (15s)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="atd-today-box">
+            <div class="atd-today-head">
+              <span>📊 Tiến độ & Ngưỡng hôm nay</span>
+              <div class="atd-today-actions" style="display:flex; gap:5px; align-items:center;">
+                <button id="atd-btn-checkin" type="button" title="Mở lại bảng Quà điểm danh hằng ngày">🎁 Quà điểm danh</button>
+                <button id="atd-refresh-today" type="button" title="Làm mới tiến độ">↻</button>
+              </div>
+            </div>
+            <div class="atd-today-grid" id="atd-today-stats"></div>
+          </div>
+          <div class="atd-actions">
+            <button id="atd-start" type="button">▶ Chạy Auto</button>
+            <button id="atd-stop" type="button" disabled>■ Dừng</button>
+            <button id="atd-reset" type="button" title="Chạy lại các nhiệm vụ ngày đã đánh dấu xong">↻ Ngày mới</button>
+          </div>
+          <div class="atd-log-title">
+            <span>Nhật ký hoạt động</span>
+            <small style="font-weight:400;opacity:0.65;font-size:10px;">tự động lưu</small>
+          </div>
+          <div id="atd-log" aria-live="polite"></div>
+          <p class="atd-note">Tiện ích tự động di chuyển nhân vật qua Bản đồ/Menu để khớp vị trí (<code>visit</code>, <code>state</code>, <code>am-in</code>), kiểm tra điều kiện tiên quyết và giữ nhịp gửi gói tin an toàn.</p>
+        </div>
+
+        <!-- VIEW 2: QUẢN LÝ ĐỆ TỬ RIÊNG BIỆT -->
+        <div id="atd-view-disciples" class="atd-view-pane disciples" style="display:none;">
+          <!-- Thẻ 1: Kết nối đệ tử ngầm -->
+          <div class="atd-disciple-card green">
+            <div class="atd-disciple-card-head">
+              <span>⚡ Đệ tử ngầm (0 Tab · 0% GPU)</span>
+              <span id="atd-headless-badge" class="atd-headless-badge off">Chưa bật</span>
+            </div>
+            <div class="atd-disciple-desc">
+              Kết nối đệ tử trực tiếp trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
+            </div>
+            <div class="atd-headless-input-row">
+              <div class="atd-headless-input-label">
+                <span>👥 Số lượng:</span>
+              </div>
+              <div class="atd-headless-input-ctrl">
+                <input type="number" id="atd-headless-count-input" class="atd-headless-input" min="1" max="100" value="4" title="Nhập số lượng đệ tử ngầm (từ 1 đến 100)" />
+                <div class="atd-headless-presets">
+                  <button type="button" class="atd-headless-preset-btn" data-count="4" title="Chọn 4 đệ tử (Chuẩn ăn trọn x5 Đồng Tâm +9 công đức)">4 ⭐</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="10" title="Chọn 10 đệ tử">10</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="20" title="Chọn 20 đệ tử">20</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="29" title="Chọn 29 đệ tử (Kịch trần 1 mạng WiFi)">29 Max</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="50" title="Chọn 50 đệ tử (Đại tăng đoàn)">50</button>
+                  <button type="button" class="atd-headless-preset-btn" data-count="100" title="Chọn 100 đệ tử">100</button>
+                </div>
+              </div>
+            </div>
+            <div class="atd-clone-btns">
+              <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm">
+                ⚡ Bật 4 Đệ tử ngầm (0 Tab)
+              </button>
+            </div>
+            <div id="atd-headless-status" class="atd-headless-status" style="display:none;"></div>
+          </div>
+
+          <!-- Thẻ 2: Điều phối Đội hình & Hành tung -->
+          <div class="atd-disciple-card gold">
+            <div class="atd-disciple-card-head">
+              <span>🚶 Hành Tung & Đội Hình</span>
+              <span id="atd-disciple-mode-badge" class="atd-mode-badge">🏛️ Tập trung Chánh điện</span>
+            </div>
+            <div class="atd-disciple-desc">
+              Chọn để đệ tử tập trung quỳ lạy trong Chánh điện hoặc tản ra đi dạo tự do khắp các nẻo đường trong chùa:
+            </div>
+            <div class="atd-mode-selector">
+              <button type="button" class="atd-mode-btn active hall" id="atd-btn-mode-hall" title="Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng bồ đoàn ngay ngắn">
+                🏛️ Tập trung Chánh điện
+              </button>
+              <button type="button" class="atd-mode-btn roam" id="atd-btn-mode-roam" title="Cho đệ tử tản ra đi dạo khắp chùa (Sân chùa, Cổng tam quan, Hồ sen, Vườn hoa, Vườn thiền, Bảo tháp...)">
+                🏃 Đi dạo khắp bản đồ
+              </button>
+            </div>
+            <div class="atd-clone-btns" style="margin-top:4px;">
+              <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
+                🙏 Phát động Lạy (Đệ tử trước)
+              </button>
+            </div>
+          </div>
+
+          <!-- Thẻ 3: Vai trò Swarm (Nếu có mở tab phụ) -->
+          <div class="atd-disciple-card">
+            <div class="atd-disciple-card-head">
+              <span>👑 Vai trò Tab trong Swarm</span>
+              <span class="atd-role-badge ${swarmRole}" id="atd-role-badge">
+                ${swarmRole === 'master' ? '👑 Chủ trì (Master)' : '🤝 Trợ lực (Follower)'}
+              </span>
+            </div>
+            <div class="atd-role-selector">
+              <button type="button" class="atd-role-chip ${swarmRole === 'master' ? 'active' : ''}" id="atd-role-btn-master" title="Đặt tab này làm Tab Chính (Nhạc trưởng). Khi tab này lạy, toàn bộ các tab khác sẽ lạy theo!">
+                👑 Tab Chủ trì (Master)
+              </button>
+              <button type="button" class="atd-role-chip ${swarmRole === 'follower' ? 'active' : ''}" id="atd-role-btn-follower" title="Đặt tab này làm Tab Trợ lực. Tab này sẽ túc trực ở Chánh điện và tuân lệnh lạy từ Tab Chủ trì!">
+                🤝 Tab Trợ lực (Follower)
+              </button>
+            </div>
+            <div class="atd-swarm-status-bar" id="atd-swarm-status-bar"></div>
+          </div>
+
+          <!-- Thẻ 4: Hướng dẫn tăng số lượng đệ tử vượt trần IP -->
+          <div class="atd-disciple-card blue">
+            <div class="atd-disciple-card-head">
+              <span>🚀 Cách tăng số lượng vượt trần 29 đệ tử</span>
+            </div>
+            <div class="atd-scale-info">
+              <div>Server <code>didenchua.online</code> giới hạn kịch trần <b>30 kết nối/IP</b> (1 tab chính + 29 đệ tử). Để tạo 50 đến 100+ đệ tử:</div>
+              <div class="atd-scale-item">
+                <b>Cách 1 (Dễ nhất - Đa mạng):</b> Dùng thêm 1 máy khác hoặc điện thoại phát 4G/5G mở phòng chùa tương tự hoặc chạy terminal. Mỗi mạng sẽ thêm được 30 đệ tử!
+              </div>
+              <div class="atd-scale-item">
+                <b>Cách 2 (VPN / Proxy):</b> Dùng extension VPN trên Chrome (đổi sang IP khác) hoặc chạy lệnh terminal có proxy.
+              </div>
+              <div class="atd-scale-item">
+                <b>Cách 3 (Terminal CLI):</b> Mở cmd trong thư mục dự án và chạy <code>node disciples.js --count=50</code>.
+              </div>
+            </div>
+          </div>
+
+          <!-- Thẻ 5: Mở Tab clone (nếu muốn) -->
+          <div class="atd-disciple-card">
+            <div class="atd-clone-subtab-header">
+              <span>🌐 Mở thêm Tab Clone trình duyệt (nếu cần):</span>
+              <button type="button" id="atd-btn-toggle-tab-clones" class="atd-link-btn">Hiện mở Tab</button>
+            </div>
+            <div id="atd-tab-clones-subbox" style="display:none; margin-top:6px;">
               <div class="atd-clone-btns">
-                <button type="button" class="atd-clone-btn highlight" id="atd-btn-toggle-headless" title="Bật/Tắt đệ tử ngầm trực tiếp trong tab này (không mở thêm tab nào)">
-                  ⚡ Bật 4 Đệ tử ngầm (0 Tab)
-                </button>
-                <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
-                  🙏 Phát động Lạy (Đệ tử trước)
-                </button>
+                <button type="button" class="atd-clone-btn" id="atd-btn-add-4clones" title="Mở 4 tab trình duyệt riêng">🚀 Mở 4 Tab</button>
+                <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab">+1 Tab</button>
               </div>
-              <div id="atd-headless-status" class="atd-headless-status" style="display:none;"></div>
-
-              <div class="atd-clone-subtab-section">
-                <div class="atd-clone-subtab-header">
-                  <span>🌐 Hoặc mở Tab Clone trình duyệt (nếu muốn):</span>
-                  <button type="button" id="atd-btn-toggle-tab-clones" class="atd-link-btn">Hiện mở Tab</button>
+              <div class="atd-clone-mini-row" style="margin-top:6px;">
+                <span>Mở lẻ từng Tab:</span>
+                <div class="atd-clone-mini-btns">
+                  <button type="button" class="atd-clone-mini-btn" data-clone="1" title="Mở Tab Trợ lực [Đệ tử #1]">#1</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="2" title="Mở Tab Trợ lực [Đệ tử #2]">#2</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="3" title="Mở Tab Trợ lực [Đệ tử #3]">#3</button>
+                  <button type="button" class="atd-clone-mini-btn" data-clone="4" title="Mở Tab Trợ lực [Đệ tử #4]">#4</button>
                 </div>
-                <div id="atd-tab-clones-subbox" style="display:none; margin-top:6px;">
-                  <div class="atd-clone-btns">
-                    <button type="button" class="atd-clone-btn" id="atd-btn-add-4clones" title="Mở 4 tab trình duyệt riêng">🚀 Mở 4 Tab</button>
-                    <button type="button" class="atd-clone-btn" id="atd-btn-add-clone" title="Mở thêm 1 tab">+1 Tab</button>
-                  </div>
-                  <div class="atd-clone-mini-row" style="margin-top:6px;">
-                    <span>Mở lẻ từng Tab:</span>
-                    <div class="atd-clone-mini-btns">
-                      <button type="button" class="atd-clone-mini-btn" data-clone="1" title="Mở Tab Trợ lực [Đệ tử #1]">#1</button>
-                      <button type="button" class="atd-clone-mini-btn" data-clone="2" title="Mở Tab Trợ lực [Đệ tử #2]">#2</button>
-                      <button type="button" class="atd-clone-mini-btn" data-clone="3" title="Mở Tab Trợ lực [Đệ tử #3]">#3</button>
-                      <button type="button" class="atd-clone-mini-btn" data-clone="4" title="Mở Tab Trợ lực [Đệ tử #4]">#4</button>
-                    </div>
-                  </div>
-                  <div class="atd-clone-tip" style="margin-top:6px;">
-                    💡 <i>Mẹo Chrome:</i> Nếu chỉ mở 1 tab, hãy bấm biểu tượng 🚫 <b>"Cửa sổ bật lên bị chặn"</b> ở góc phải thanh URL ➔ chọn <b>"Luôn cho phép"</b>.
-                  </div>
-                </div>
-              </div>
-
-              <div class="atd-clone-terminal-tip">
-                💻 <b>Chạy qua Terminal:</b> Mở cmd trong thư mục dự án và gõ <code>node disciples.js</code> để chạy đệ tử ngoài terminal!
               </div>
             </div>
+          </div>
+        </div>
+      </div>
             <div class="atd-hac-quick-box atd-quiz-quick-box" id="atd-quiz-quick-box">
               <div class="atd-hac-title">
                 <span>🪷 <b>Đố vui Phật pháp</b> (Bỏ qua lố giờ):</span>
@@ -4569,14 +4867,49 @@
       if (hacBox) {
         hacBox.style.display = (catId === "all" || catId === "linhvat") ? "flex" : "none";
       }
-      const cloneBox = $("#atd-clone-ctrl-box", panel);
-      if (cloneBox) {
-        cloneBox.style.display = (catId === "all" || catId === "huong") ? "flex" : "none";
+    }
+
+    // --- CHUYỂN ĐỔI MENU CHÍNH (TỰ ĐỘNG & TÁC VỤ VS QUẢN LÝ ĐỆ TỬ) ---
+    const navBtnTasks = $("#atd-nav-btn-tasks", panel);
+    const navBtnDisciples = $("#atd-nav-btn-disciples", panel);
+    const viewTasks = $("#atd-view-tasks", panel);
+    const viewDisciples = $("#atd-view-disciples", panel);
+
+    const switchMenu = (view) => {
+      localStorage.setItem("atd_active_menu", view);
+      if (view === "disciples") {
+        navBtnTasks?.classList.remove("active");
+        navBtnDisciples?.classList.add("active");
+        if (viewTasks) viewTasks.style.display = "none";
+        if (viewDisciples) viewDisciples.style.display = "flex";
+        headlessDisciples.updateUI();
+      } else {
+        navBtnDisciples?.classList.remove("active");
+        navBtnTasks?.classList.add("active");
+        if (viewDisciples) viewDisciples.style.display = "none";
+        if (viewTasks) viewTasks.style.display = "block";
       }
-      const roleBox = $("#atd-swarm-role-box", panel);
-      if (roleBox) {
-        roleBox.style.display = (catId === "all" || catId === "huong") ? "flex" : "none";
-      }
+    };
+
+    if (navBtnTasks && navBtnDisciples) {
+      navBtnTasks.addEventListener("click", () => switchMenu("tasks"));
+      navBtnDisciples.addEventListener("click", () => switchMenu("disciples"));
+      const savedMenu = localStorage.getItem("atd_active_menu") || "tasks";
+      switchMenu(savedMenu);
+    }
+
+    // Nút đổi chế độ: Tập trung Chánh điện vs Đi dạo tự do khắp bản đồ
+    const btnModeHall = $("#atd-btn-mode-hall", panel);
+    if (btnModeHall) {
+      btnModeHall.addEventListener("click", () => {
+        headlessDisciples.recallToHall();
+      });
+    }
+    const btnModeRoam = $("#atd-btn-mode-roam", panel);
+    if (btnModeRoam) {
+      btnModeRoam.addEventListener("click", () => {
+        headlessDisciples.startRoaming();
+      });
     }
 
     const btnQuizOpen = $("#atd-btn-quiz-open", panel);
