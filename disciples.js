@@ -91,7 +91,9 @@ class PureWebSocket {
     const pPort = parseInt(pUrl.port, 10) || (pProtocol.startsWith("socks") ? 1080 : 8080);
 
     const raw = net.connect(pPort, pHost, () => {
-      raw.setTimeout(12000, () => {
+      if (raw.setKeepAlive) raw.setKeepAlive(true, 10000);
+      if (raw.setNoDelay) raw.setNoDelay(true);
+      raw.setTimeout(8000, () => {
         raw.destroy(new Error(`Proxy connection timeout: ${pHost}:${pPort}`));
       });
 
@@ -151,6 +153,8 @@ class PureWebSocket {
   }
 
   _bindSocket(s) {
+    if (s.setKeepAlive) s.setKeepAlive(true, 10000);
+    if (s.setNoDelay) s.setNoDelay(true);
     s.on("data", (chunk) => this._onData(chunk));
     s.on("error", (err) => this._handleError(err));
     s.on("close", () => {
@@ -344,6 +348,20 @@ if (proxyFile && fs.existsSync(proxyFile)) {
 }
 let autoFreeProxy = args.includes("--free-proxy") || args.includes("--auto-proxy") || args.includes("--free");
 
+const failedProxies = new Map();
+function markProxyFailed(proxy) {
+  if (!proxy) return;
+  const count = (failedProxies.get(proxy) || 0) + 1;
+  failedProxies.set(proxy, count);
+  // Loại bỏ các proxy chết liên tục để các đệ tử khác không bốc trúng
+  if (count >= 2 && proxyList.length > 30) {
+    const idx = proxyList.indexOf(proxy);
+    if (idx !== -1) {
+      proxyList.splice(idx, 1);
+    }
+  }
+}
+
 function getProxyForDisciple(index, attempt = 0) {
   if (!proxyList || proxyList.length === 0) return null;
   const idx = ((index - 1) + attempt) % proxyList.length;
@@ -352,7 +370,8 @@ function getProxyForDisciple(index, attempt = 0) {
 
 function fetchFreeProxies() {
   return new Promise((resolve) => {
-    const url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=4000&country=all";
+    // Ưu tiên tải proxy phản hồi nhanh (timeout <= 2500ms) để giảm thiểu tối đa rớt mạng
+    const url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=2500&country=all";
     https.get(url, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
@@ -360,7 +379,7 @@ function fetchFreeProxies() {
         const lines = data.split("\n").map((s) => s.trim()).filter((s) => s && s.includes(":"));
         if (lines.length > 0) {
           proxyList = lines.map((p) => (p.startsWith("socks5://") ? p : `socks5://${p}`));
-          console.log(`\x1b[32m[PROXY] Đã tự động tải về ${proxyList.length} Proxy SOCKS5 miễn phí!\x1b[0m`);
+          console.log(`\x1b[32m[PROXY] Đã tự động tải về ${proxyList.length} Proxy SOCKS5 tốc độ cao!\x1b[0m`);
         } else {
           console.log("\x1b[31m[PROXY] Không lấy được proxy tự động, sẽ thử kết nối trực tiếp.\x1b[0m");
         }
@@ -652,12 +671,12 @@ class Disciple {
 
   startHeartbeat() {
     this.cleanupTimers();
-    // Gửi hb mỗi 20s
+    // Gửi hb mỗi 10s để giữ kết nối proxy luôn hoạt động ổn định
     this.heartbeatTimer = setInterval(() => {
       if (this.connected) {
         this.send({ t: "hb" });
       }
-    }, 20000);
+    }, 10000);
 
     // Định kỳ refresh tọa độ Chánh điện mỗi 15s
     this.refreshTimer = setInterval(() => {
@@ -691,10 +710,13 @@ class Disciple {
   }
 
   scheduleReconnect() {
+    if (this.currentProxy) {
+      markProxyFailed(this.currentProxy);
+    }
     this.proxyAttempt++;
     setTimeout(() => {
       if (!this.stopped) this.connect();
-    }, 3000);
+    }, 2500);
   }
 
   reconnect() {
