@@ -335,12 +335,39 @@
       const savedCount = parseInt(localStorage.getItem("atd_headless_count") || "4", 10);
       this.targetCount = (isNaN(savedCount) || savedCount < 1) ? 4 : Math.min(100, savedCount);
       this.formationMode = localStorage.getItem("atd_headless_mode") || "hall"; // "hall" | "roam"
+      this.customName = (localStorage.getItem("atd_headless_name") || "").trim();
+      this.autoNumber = localStorage.getItem("atd_headless_autonumber") !== "false";
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
       this.roamInterval = null;
       this.spawnTimers = [];
       this.reconnectTimers = [];
+    }
+
+    getDiscipleName(index) {
+      const base = (this.customName || "").trim();
+      if (!base) {
+        return `Đệ tử ngầm #${index}`;
+      }
+      // Nếu có mẫu thay thế {i} hoặc {index} (vd: "Tiểu Tăng {i}" -> "Tiểu Tăng 1")
+      if (/{i(ndex)?}/i.test(base)) {
+        return base.replace(/{i(ndex)?}/gi, index);
+      }
+      // Nếu có dấu # sẵn trong tên (vd: "Thích Tâm #" -> "Thích Tâm #1")
+      if (base.includes("#")) {
+        return base.replace(/#+/, "#" + index);
+      }
+      // Nếu người dùng tắt đánh số
+      if (!this.autoNumber) {
+        return base;
+      }
+      // Nếu chỉ tạo 1 đệ tử duy nhất thì giữ nguyên tên
+      if (this.targetCount === 1) {
+        return base;
+      }
+      // Mặc định tự động gắn số thứ tự để phân biệt trong Chánh điện
+      return `${base} #${index}`;
     }
 
     getOffsetForIndex(index) {
@@ -369,7 +396,8 @@
       this.stop(true);
       this.enabled = true;
       const curRoom = currentServerRoom || new URLSearchParams(window.location.search).get("phong") || "chua-1";
-      log(`⚡ Đang kết nối ${this.targetCount} Đệ tử ngầm vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
+      const displayName = this.customName || "Đệ tử ngầm";
+      log(`⚡ Đang kết nối ${this.targetCount} ${displayName} vào Chánh điện phòng [${curRoom}] (0 tab · Siêu nhẹ · 0% GPU)…`, "step");
 
       // Giãn cách mở kết nối (~80ms/đệ tử) để kết nối êm ái, tránh bị server chặn spam
       for (let i = 1; i <= this.targetCount; i++) {
@@ -399,10 +427,11 @@
       const cid = generateStandardUUID();
       const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
       let ws;
+      const discipleName = this.getDiscipleName(index);
       try {
         ws = new WebSocket(wsUrl);
       } catch (e) {
-        log(`[Đệ tử ngầm #${index}] Lỗi mở kết nối: ${e.message}`, "warn");
+        log(`[${discipleName}] Lỗi mở kết nối: ${e.message}`, "warn");
         return;
       }
 
@@ -410,7 +439,7 @@
       const disciple = {
         index,
         ws,
-        name: `Đệ tử ngầm #${index}`,
+        name: discipleName,
         cid,
         room,
         offset: this.getOffsetForIndex(index),
@@ -466,10 +495,10 @@
                 disciple.ws.send(JSON.stringify({ t: "visit", zone: lm.zone }));
                 disciple.ws.send(JSON.stringify({ t: "state", x: lm.x, y: groundY, z: lm.z, ry: 0, s: 0 }));
               } catch {}
-              log(`⚡ [Đệ tử ngầm #${index}] Đã vào chùa và đi dạo tại [${lm.name}] (ID: ${disciple.myId})`, "ok");
+              log(`⚡ [${disciple.name}] Đã vào chùa và đi dạo tại [${lm.name}] (ID: ${disciple.myId})`, "ok");
             } else {
               this.sendToHall(disciple);
-              log(`⚡ [Đệ tử ngầm #${index}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
+              log(`⚡ [${disciple.name}] Đã vào Chánh điện [${disciple.room}] (ID: ${disciple.myId})`, "ok");
             }
             this.updateUI();
             updateSwarmInfoUI();
@@ -753,7 +782,8 @@
       this.updateUI();
       updateSwarmInfoUI();
       if (!silent) {
-        log("⚡ Đã tắt và ngắt kết nối toàn bộ Đệ tử ngầm.", "info");
+        const displayName = this.customName || "Đệ tử ngầm";
+        log(`⚡ Đã tắt và ngắt kết nối toàn bộ ${displayName}.`, "info");
       }
     }
 
@@ -770,6 +800,8 @@
       const btn = $("#atd-btn-toggle-headless");
       const statusEl = $("#atd-headless-status");
       const input = $("#atd-headless-count-input");
+      const inputName = $("#atd-headless-name-input");
+      const chkAutoNumber = $("#atd-headless-autonumber");
       const navPill = $("#atd-nav-disciple-count");
       const btnHall = $("#atd-btn-mode-hall");
       const btnRoam = $("#atd-btn-mode-roam");
@@ -777,6 +809,7 @@
 
       const readyCount = this.getActiveCount();
       const targetNum = this.targetCount;
+      const displayName = this.customName || "Đệ tử ngầm";
 
       if (navPill) {
         navPill.textContent = this.enabled ? readyCount : 0;
@@ -792,6 +825,12 @@
 
       if (input && document.activeElement !== input) {
         input.value = this.targetCount;
+      }
+      if (inputName && document.activeElement !== inputName) {
+        inputName.value = this.customName;
+      }
+      if (chkAutoNumber) {
+        chkAutoNumber.checked = this.autoNumber;
       }
 
       if (badge) {
@@ -809,11 +848,11 @@
 
       if (btn) {
         if (this.enabled) {
-          btn.textContent = `⏹ Tắt ${targetNum} Đệ tử ngầm`;
+          btn.textContent = `⏹ Tắt ${targetNum} ${displayName}`;
           btn.classList.remove("highlight");
           btn.classList.add("danger");
         } else {
-          btn.textContent = `⚡ Bật ${this.targetCount} Đệ tử ngầm (0 Tab)`;
+          btn.textContent = `⚡ Bật ${this.targetCount} ${displayName} (0 Tab)`;
           btn.classList.remove("danger");
           btn.classList.add("highlight");
         }
@@ -824,13 +863,13 @@
           statusEl.style.display = "block";
           const modeDesc = this.formationMode === "roam" ? "đang tản ra đi dạo khắp chùa" : "đang túc trực trong Chánh điện";
           if (readyCount >= this.targetCount) {
-            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ngầm</b> ${modeDesc} · 0 tab · 0% GPU`;
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} ${displayName}</b> ${modeDesc} · 0 tab · 0% GPU`;
             statusEl.style.color = "#34d399";
           } else if (readyCount >= 29 && this.targetCount > 29) {
-            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} đệ tử ${modeDesc}</b> · <span style="color:#f59e0b;">(Máy chủ kịch trần 30 kết nối/IP: 1 tab chính + 29 đệ tử)</span>`;
+            statusEl.innerHTML = `🟢 <b>${readyCount}/${this.targetCount} ${displayName} ${modeDesc}</b> · <span style="color:#f59e0b;">(Máy chủ kịch trần 30 kết nối/IP: 1 tab chính + 29 đệ tử)</span>`;
             statusEl.style.color = "#38bdf8";
           } else {
-            statusEl.innerHTML = `⏳ Đang kết nối đệ tử ngầm (${readyCount}/${this.targetCount})…`;
+            statusEl.innerHTML = `⏳ <b>Đang kết nối ${displayName} (${readyCount}/${this.targetCount})…</b>`;
             statusEl.style.color = "#e5bc72";
           }
         } else {
@@ -4687,6 +4726,19 @@
             <div class="atd-disciple-desc">
               Kết nối đệ tử trực tiếp trong tab này. <b>Không mở thêm tab nào, 0% GPU, không lag máy!</b>
             </div>
+            <!-- Ô nhập tên đệ tử (để trống sẽ dùng tên mặc định: Đệ tử ngầm) -->
+            <div class="atd-headless-input-row">
+              <div class="atd-headless-input-label">
+                <span>🏷️ Tên đệ tử:</span>
+              </div>
+              <div class="atd-headless-input-ctrl" style="flex:1;">
+                <input type="text" id="atd-headless-name-input" class="atd-headless-name-input" placeholder="Mặc định: Đệ tử ngầm" maxlength="25" title="Nhập tên đệ tử (để trống sẽ dùng mặc định: 'Đệ tử ngầm')" />
+                <label class="atd-autonumber-label" title="Tự động thêm số thứ tự #1, #2... vào sau tên khi tạo nhiều đệ tử">
+                  <input type="checkbox" id="atd-headless-autonumber" checked />
+                  <span>#Số</span>
+                </label>
+              </div>
+            </div>
             <div class="atd-headless-input-row">
               <div class="atd-headless-input-label">
                 <span>👥 Số lượng:</span>
@@ -5009,6 +5061,28 @@
     const btnHacDua = $("#atd-btn-hac-dua", panel);
     if (btnHacDua) {
       btnHacDua.addEventListener("click", () => triggerDirectCuoiHac("dua"));
+    }
+    const inputHeadlessName = $("#atd-headless-name-input", panel);
+    const chkHeadlessAutonumber = $("#atd-headless-autonumber", panel);
+    if (inputHeadlessName) {
+      inputHeadlessName.value = headlessDisciples.customName;
+      const handleNameChange = () => {
+        const val = inputHeadlessName.value.trim();
+        headlessDisciples.customName = val;
+        localStorage.setItem("atd_headless_name", val);
+        if (!headlessDisciples.enabled) {
+          headlessDisciples.updateUI();
+        }
+      };
+      inputHeadlessName.addEventListener("change", handleNameChange);
+      inputHeadlessName.addEventListener("input", handleNameChange);
+    }
+    if (chkHeadlessAutonumber) {
+      chkHeadlessAutonumber.checked = headlessDisciples.autoNumber;
+      chkHeadlessAutonumber.addEventListener("change", () => {
+        headlessDisciples.autoNumber = chkHeadlessAutonumber.checked;
+        localStorage.setItem("atd_headless_autonumber", chkHeadlessAutonumber.checked ? "true" : "false");
+      });
     }
     const inputHeadlessCount = $("#atd-headless-count-input", panel);
     if (inputHeadlessCount) {

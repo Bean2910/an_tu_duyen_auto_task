@@ -48,6 +48,7 @@ function getArg(name, defaultValue) {
 
 const targetCount = parseInt(getArg("count", "4"), 10) || 4;
 let targetRoom = getArg("room", "chua-1");
+let customName = getArg("name", "");
 let autoBow = args.includes("--auto");
 const SERVER_URL = "wss://didenchua.online/ws";
 
@@ -96,9 +97,18 @@ function getHallOffset(index) {
 }
 
 class Disciple {
+  formatName(index) {
+    const base = (customName || "").trim();
+    if (!base) return `Đệ tử ngầm #${index}`;
+    if (/{i(ndex)?}/i.test(base)) return base.replace(/{i(ndex)?}/gi, index);
+    if (base.includes("#")) return base.replace(/#+/, "#" + index);
+    if (targetCount === 1) return base;
+    return `${base} #${index}`;
+  }
+
   constructor(index, room) {
     this.index = index;
-    this.name = `Đệ tử ngầm #${index}`;
+    this.name = this.formatName(index);
     this.room = room;
     this.cid = crypto.randomUUID();
     this.offset = getHallOffset(index);
@@ -437,6 +447,7 @@ function printHeader() {
   console.log("\x1b[1;33m       AN TỰ DUYÊN - BẦY ĐỆ TỬ NGẦM (TERMINAL HEADLESS DISCIPLES)       \x1b[0m");
   console.log("\x1b[1;36m========================================================================\x1b[0m");
   console.log(`\x1b[32m▶ Số lượng đệ tử :\x1b[0m ${targetCount}`);
+  console.log(`\x1b[32m▶ Tên đệ tử      :\x1b[0m ${customName || "Đệ tử ngầm (mặc định)"}`);
   console.log(`\x1b[32m▶ Phòng chùa     :\x1b[0m ${targetRoom}`);
   console.log(`\x1b[32m▶ Tự động lạy    :\x1b[0m ${autoBow ? "BẬT (Mỗi 7.5s)" : "TẮT (Nhấn Space / Enter để lạy)"}`);
   console.log(`\x1b[32m▶ Tài nguyên     :\x1b[0m 0% GPU, < 15MB RAM, 0 tab trình duyệt`);
@@ -446,6 +457,7 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'roam' + Enter\x1b[0m         : Cho đệ tử tản ra đi dạo tự do khắp bản đồ chùa");
   console.log("  • \x1b[1;33mGõ 'hall' + Enter\x1b[0m         : Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
+  console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
   console.log("  • \x1b[1;33mGõ 'status' + Enter\x1b[0m      : Kiểm tra trạng thái đệ tử");
   console.log("  • \x1b[1;33mGõ 'room <tên>' + Enter\x1b[0m  : Đổi phòng (VD: room chua-2)");
@@ -486,6 +498,13 @@ rl.on("line", (line) => {
     } else {
       console.log("\x1b[31m[LỖI] Số lượng đệ tử phải là số từ 1 đến 100!\x1b[0m");
     }
+  } else if (cmd.startsWith("name ") || cmd.startsWith("ten ")) {
+    const newName = line.trim().replace(/^(name|ten)\s+/i, "").trim();
+    customName = newName;
+    disciples.forEach((d) => {
+      d.name = d.formatName(d.index);
+    });
+    console.log(`\x1b[32m[ĐỔI TÊN] Đã cập nhật tên đệ tử thành: ${customName || "Đệ tử ngầm (mặc định)"}\x1b[0m`);
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
