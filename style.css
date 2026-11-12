@@ -1552,4 +1552,30 @@
   color: #fef08a;
 }
 
+.atd-lecture-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #e9d5ff;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+.atd-lecture-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #a855f7;
+  margin: 0;
+  width: 13px;
+  height: 13px;
+}
+.atd-lecture-label:hover {
+  color: #fff;
+}
+.atd-lecture-preset-btn:hover {
+  background: rgba(168, 85, 247, 0.35) !important;
+  color: #fff !important;
+}
+
+
 

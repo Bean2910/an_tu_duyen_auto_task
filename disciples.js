@@ -53,6 +53,15 @@ let autoBow = args.includes("--auto");
 let airWalk = args.includes("--air") || args.includes("--fly");
 let followPlayer = args.includes("--follow") || args.includes("--f");
 let corridorMode = args.includes("--corridor") || args.includes("--rows2") || args.includes("--guard");
+let lectureMode = args.includes("--lecture") || args.includes("--rows") || args.includes("--hang");
+let lectureRows = 3;
+const rowsArg = getArg("rows", "") || getArg("hang", "");
+if (rowsArg && !isNaN(parseInt(rowsArg, 10))) {
+  lectureRows = Math.max(2, parseInt(rowsArg, 10));
+  lectureMode = true;
+}
+let lectureFacing = getArg("facing", "front");
+let lectureOrient = (args.includes("--doc") || getArg("orient", "") === "doc") ? "doc" : "ngang";
 let randomLook = !args.includes("--uniform");
 let lookSeed = Math.floor(Math.random() * 10000);
 const SERVER_URL = "wss://didenchua.online/ws";
@@ -516,7 +525,7 @@ function startRoaming() {
 
       if (targetPlayer) {
         let localSlot = 0;
-        if (corridorMode) {
+        if (lectureMode || corridorMode) {
           const readyList = disciples
             .filter((otherD) => otherD.ready && otherD.ws && otherD.ws.readyState === 1)
             .sort((a, b) => a.index - b.index);
@@ -545,8 +554,42 @@ function startRoaming() {
         const rightX = -Math.cos(playerRy);
         const rightZ = Math.sin(playerRy);
 
-        let slotX, slotZ;
-        if (corridorMode) {
+        let slotX, slotZ, slotRy;
+        if (lectureMode) {
+          // ĐỘI HÌNH NGỒI THEO HÀNG (NGHE THUYẾT PHÁP) - TỰ CHIA ĐỆ TỬ THEO SỐ HÀNG ĐÃ NHẬP
+          const readyFollowers = disciples.filter((x) => x.ready && x.ws && x.ws.readyState === 1);
+          const total = Math.max(1, readyFollowers.length);
+          const K = Math.min(total, Math.max(2, lectureRows));
+
+          let rowIndex, colOffset;
+          if (lectureOrient === "doc") {
+            const numCols = K;
+            rowIndex = Math.floor(localSlot / numCols);
+            const colIndex = localSlot % numCols;
+            colOffset = colIndex - (numCols - 1) / 2;
+          } else {
+            const numRows = K;
+            const cols = Math.ceil(total / numRows);
+            rowIndex = Math.floor(localSlot / cols);
+            const countInRow = Math.min(cols, total - rowIndex * cols);
+            const colIndex = localSlot % cols;
+            colOffset = colIndex - (countInRow - 1) / 2;
+          }
+
+          const colSpacing = 1.15;
+          const rowSpacing = 1.25;
+          const baseDist = 1.6 + rowIndex * rowSpacing;
+
+          if (lectureFacing === "front") {
+            slotX = targetPlayer.x + fX * baseDist + rightX * (colOffset * colSpacing);
+            slotZ = targetPlayer.z + fZ * baseDist + rightZ * (colOffset * colSpacing);
+            slotRy = playerRy + Math.PI;
+          } else {
+            slotX = targetPlayer.x - fX * baseDist + rightX * (colOffset * colSpacing);
+            slotZ = targetPlayer.z - fZ * baseDist + rightZ * (colOffset * colSpacing);
+            slotRy = playerRy;
+          }
+        } else if (corridorMode) {
           // ĐỘI HÌNH 2 HÀNG DANH DỰ THẲNG TẮP (TẠO LỐI ĐI Ở GIỮA)
           const isLeft = (localSlot % 2 === 0);
           const rowInCorridor = Math.floor(localSlot / 2);
@@ -558,6 +601,7 @@ function startRoaming() {
 
           slotX = targetPlayer.x - fX * baseFollowDist + latX * corridorHalfWidth;
           slotZ = targetPlayer.z - fZ * baseFollowDist + latZ * corridorHalfWidth;
+          slotRy = playerRy;
         } else {
           const totalFollowers = disciples.filter((x) => x.ready).length;
           const formationWidth = totalFollowers > 30 ? 9 : (totalFollowers > 10 ? 5 : 3);
@@ -567,6 +611,7 @@ function startRoaming() {
 
           slotX = targetPlayer.x - fX * baseFollowDist + rightX * (col * 0.95);
           slotZ = targetPlayer.z - fZ * baseFollowDist + rightZ * (col * 0.95);
+          slotRy = playerRy;
         }
 
         const dx = slotX - d.pos.x;
@@ -589,7 +634,7 @@ function startRoaming() {
             d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * currentSpeed) * 100) / 100;
             d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * currentSpeed) * 100) / 100;
           }
-          d.pos.ry = Math.round(playerRy * 100) / 100;
+          d.pos.ry = Math.round(slotRy * 100) / 100;
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
           d.lastStateSend = now;
@@ -607,7 +652,7 @@ function startRoaming() {
         } else {
           d.pos.x = Math.round(slotX * 100) / 100;
           d.pos.z = Math.round(slotZ * 100) / 100;
-          d.pos.ry = Math.round(playerRy * 100) / 100;
+          d.pos.ry = Math.round(slotRy * 100) / 100;
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
 
@@ -810,6 +855,9 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'air' hoặc 'fly' + Enter\x1b[0m : Bật/tắt chế độ Đi trên không (Khinh công)");
   console.log("  • \x1b[1;33mGõ 'follow' hoặc 'f' + Enter\x1b[0m: Bật/tắt chế độ Tự đi theo người chơi khác");
   console.log("  • \x1b[1;33mGõ 'corridor' hoặc 'hang2'\x1b[0m   : Bật/tắt đội hình 2 hàng danh dự tạo lối đi");
+  console.log("  • \x1b[1;33mGõ 'rows <số hàng>' hoặc 'hang <n>'\x1b[0m: Ngồi theo hàng nghe thuyết pháp (VD: rows 4)");
+  console.log("  • \x1b[1;33mGõ 'ngang' / 'doc' + Enter\x1b[0m  : Chuyển đổi giữa Hàng Ngang ↔ Hàng Dọc");
+  console.log("  • \x1b[1;33mGõ 'front' / 'behind'\x1b[0m       : Ngồi trước mặt đối diện hoặc sau lưng sư phụ");
   console.log("  • \x1b[1;33mGõ 'greet <câu chào>' + Enter\x1b[0m: Cho các đệ tử chắp tay hô chào sếp/đạo hữu");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
@@ -903,7 +951,44 @@ rl.on("line", (line) => {
     }
   } else if (cmd === "corridor" || cmd === "hang2" || cmd === "loidi") {
     corridorMode = !corridorMode;
+    if (corridorMode) lectureMode = false;
     console.log(`\x1b[36m[2 HÀNG DANH DỰ] Đã ${corridorMode ? "BẬT (xếp 2 hàng tạo lối đi thông thoáng ở giữa)" : "TẮT (trở về cánh cung)"}!\x1b[0m`);
+  } else if (cmd.startsWith("rows ") || cmd.startsWith("hang ")) {
+    const num = parseInt(cmd.replace(/^(rows|hang)\s+/, ""), 10);
+    if (!isNaN(num) && num >= 2) {
+      lectureRows = Math.min(30, num);
+      lectureMode = true;
+      corridorMode = false;
+      const total = disciples.filter((x) => x.ready).length;
+      const other = Math.ceil(Math.max(1, total) / lectureRows);
+      const orientText = lectureOrient === "doc" ? `${lectureRows} hàng dọc (mỗi hàng dài ~${other} đệ tử)` : `${lectureRows} hàng ngang (mỗi hàng ~${other} đệ tử)`;
+      console.log(`\x1b[35m[NGỒI THEO HÀNG] Đã BẬT: Chia đều ${total} đệ tử thành ${orientText}! Hướng ngồi: ${lectureFacing === "front" ? "Trước mặt đối diện" : "Sau lưng"}\x1b[0m`);
+    } else {
+      console.log("\x1b[31m[LỖI] Số hàng phải lớn hơn hoặc bằng 2!\x1b[0m");
+    }
+  } else if (cmd === "hangngang" || cmd === "ngang") {
+    lectureOrient = "ngang";
+    const total = disciples.filter((x) => x.ready).length;
+    const cols = Math.ceil(Math.max(1, total) / lectureRows);
+    console.log(`\x1b[35m[KIỂU HÀNG] Đã chuyển sang xếp theo HÀNG NGANG (${lectureRows} hàng ngang, mỗi hàng ~${cols} đệ tử ngồi cạnh nhau)!\x1b[0m`);
+  } else if (cmd === "hangdoc" || cmd === "doc") {
+    lectureOrient = "doc";
+    const total = disciples.filter((x) => x.ready).length;
+    const rows = Math.ceil(Math.max(1, total) / lectureRows);
+    console.log(`\x1b[35m[KIỂU HÀNG] Đã chuyển sang xếp theo HÀNG DỌC (${lectureRows} hàng dọc, mỗi hàng dài ~${rows} đệ tử xếp thẳng ra sau)!\x1b[0m`);
+  } else if (cmd.startsWith("facing ") || cmd === "front" || cmd === "behind") {
+    if (cmd === "front" || cmd.includes("front") || cmd.includes("truoc")) {
+      lectureFacing = "front";
+      console.log(`\x1b[35m[HƯỚNG NGỒI] Đã chuyển sang: TRƯỚC MẶT ĐỐI DIỆN!\x1b[0m`);
+    } else {
+      lectureFacing = "behind";
+      console.log(`\x1b[35m[HƯỚNG NGỒI] Đã chuyển sang: SAU LƯNG!\x1b[0m`);
+    }
+  } else if (cmd === "lecture" || cmd === "thuyetphap") {
+    lectureMode = !lectureMode;
+    if (lectureMode) corridorMode = false;
+    const orientText = lectureOrient === "doc" ? `${lectureRows} hàng dọc` : `${lectureRows} hàng ngang`;
+    console.log(`\x1b[35m[NGHE THUYẾT PHÁP] Đã ${lectureMode ? `BẬT (ngồi theo ${orientText})` : "TẮT (về cánh cung)"}!\x1b[0m`);
   } else if (cmd === "look" || cmd === "trangphuc" || cmd === "randomlook") {
     randomLook = !randomLook;
     lookSeed = Math.floor(Math.random() * 10000);

@@ -533,7 +533,9 @@
             hint.style.color = "#34d399";
           }
         }
-        if (typeof headlessDisciples !== "undefined" && headlessDisciples.corridorMode && sel.value !== "auto") {
+        if (typeof headlessDisciples !== "undefined" && headlessDisciples.lectureMode && sel.value !== "auto") {
+          hint.textContent += ` · 🧘 Ngồi ${headlessDisciples.lectureRows} hàng ${headlessDisciples.lectureOrient === "doc" ? "dọc" : "ngang"} nghe thuyết pháp`;
+        } else if (typeof headlessDisciples !== "undefined" && headlessDisciples.corridorMode && sel.value !== "auto") {
           hint.textContent += " · 🛡️ 2 hàng tạo lối đi";
         }
       }
@@ -555,6 +557,11 @@
       this.followPlayer = localStorage.getItem("atd_headless_follow_player") === "true";
       this.followTargetId = localStorage.getItem("atd_headless_follow_target") || "master";
       this.corridorMode = localStorage.getItem("atd_headless_corridor") === "true";
+      this.lectureMode = localStorage.getItem("atd_headless_lecture") === "true";
+      const savedLectureRows = parseInt(localStorage.getItem("atd_headless_lecture_rows") || "3", 10);
+      this.lectureRows = (isNaN(savedLectureRows) || savedLectureRows < 2) ? 3 : Math.min(30, savedLectureRows);
+      this.lectureFacing = localStorage.getItem("atd_headless_lecture_facing") || "front"; // "front" | "behind"
+      this.lectureOrient = localStorage.getItem("atd_headless_lecture_orient") || "ngang"; // "ngang" (hàng ngang) | "doc" (hàng dọc)
       this.randomLook = localStorage.getItem("atd_headless_random_look") !== "false";
       this.lookSeed = Math.floor(Math.random() * 10000);
       this.greetTemplate = localStorage.getItem("atd_headless_greet_tpl") || "Chào sếp {name}";
@@ -639,7 +646,58 @@
     setCorridorMode(enabled) {
       this.corridorMode = !!enabled;
       localStorage.setItem("atd_headless_corridor", this.corridorMode ? "true" : "false");
+      if (this.corridorMode && this.lectureMode) {
+        this.lectureMode = false;
+        localStorage.setItem("atd_headless_lecture", "false");
+      }
       log(this.corridorMode ? "🛡️ [ĐỘI HÌNH] Đã bật 2 hàng danh dự (tạo lối đi ở giữa khi theo sau 1 người)!" : "🚶 Đã chuyển về đội hình hộ tống cánh cung.", "info");
+      this.updateUI();
+    }
+
+    setLectureMode(enabled) {
+      this.lectureMode = !!enabled;
+      localStorage.setItem("atd_headless_lecture", this.lectureMode ? "true" : "false");
+      if (this.lectureMode && this.corridorMode) {
+        this.corridorMode = false;
+        localStorage.setItem("atd_headless_corridor", "false");
+      }
+      const total = this.enabled ? this.getActiveCount() : this.targetCount;
+      const K = Math.min(Math.max(1, total), Math.max(2, this.lectureRows));
+      const other = Math.ceil(Math.max(1, total) / K);
+      const orientText = this.lectureOrient === "doc" ? `${K} hàng dọc` : `${K} hàng ngang`;
+      log(this.lectureMode
+        ? `🧘 [NGHE THUYẾT PHÁP] Đã bật chế độ Ngồi theo hàng (${orientText}, mỗi hàng ~${other} đệ tử)!`
+        : "🚶 Đã tắt chế độ Ngồi nghe thuyết pháp.", "info");
+      this.updateUI();
+    }
+
+    setLectureRows(num) {
+      const n = parseInt(num, 10);
+      if (isNaN(n) || n < 2) return;
+      this.lectureRows = Math.min(30, n);
+      localStorage.setItem("atd_headless_lecture_rows", String(this.lectureRows));
+      const total = this.enabled ? this.getActiveCount() : this.targetCount;
+      const other = Math.ceil(Math.max(1, total) / this.lectureRows);
+      const orientText = this.lectureOrient === "doc" ? `${this.lectureRows} hàng dọc (mỗi hàng dài ~${other} đệ tử)` : `${this.lectureRows} hàng ngang (mỗi hàng ~${other} đệ tử)`;
+      log(`🧘 [SỐ HÀNG] Đã chỉnh: Chia đều ${total} đệ tử thành ${orientText}!`, "info");
+      this.updateUI();
+    }
+
+    setLectureOrient(orient) {
+      this.lectureOrient = (orient === "doc") ? "doc" : "ngang";
+      localStorage.setItem("atd_headless_lecture_orient", this.lectureOrient);
+      const total = this.enabled ? this.getActiveCount() : this.targetCount;
+      const K = Math.min(Math.max(1, total), Math.max(2, this.lectureRows));
+      const other = Math.ceil(Math.max(1, total) / K);
+      const orientText = this.lectureOrient === "doc" ? `${K} hàng dọc (mỗi hàng dài ~${other} đệ tử)` : `${K} hàng ngang (mỗi hàng ~${other} đệ tử)`;
+      log(`🧘 [KIỂU HÀNG] Đã chuyển sang xếp theo: ${orientText}!`, "info");
+      this.updateUI();
+    }
+
+    setLectureFacing(facing) {
+      this.lectureFacing = (facing === "front" || facing === "behind") ? facing : "front";
+      localStorage.setItem("atd_headless_lecture_facing", this.lectureFacing);
+      log(`🧘 [HƯỚNG NGỒI] Đệ tử sẽ ngồi ${this.lectureFacing === "front" ? "trước mặt (đối diện nhìn vào người thuyết pháp)" : "sau lưng người chơi"}!`, "info");
       this.updateUI();
     }
 
@@ -738,6 +796,35 @@
     }
 
     getOffsetForIndex(index) {
+      if (this.lectureMode && this.lectureRows >= 2) {
+        const total = Math.max(1, this.targetCount);
+        const K = Math.min(total, Math.max(2, this.lectureRows));
+        const localSlot = index - 1;
+        let rowIndex, colOffset;
+        const colSpacing = 1.15;
+        const rowSpacing = 1.25;
+
+        if (this.lectureOrient === "doc") {
+          // XẾP THEO K HÀNG DỌC (CỘT)
+          const numCols = K;
+          rowIndex = Math.floor(localSlot / numCols);
+          const colIndex = localSlot % numCols;
+          colOffset = colIndex - (numCols - 1) / 2;
+        } else {
+          // XẾP THEO K HÀNG NGANG (MẶC ĐỊNH)
+          const numRows = K;
+          const cols = Math.ceil(total / numRows);
+          rowIndex = Math.floor(localSlot / cols);
+          const countInRow = Math.min(cols, total - rowIndex * cols);
+          const colIndex = localSlot % cols;
+          colOffset = colIndex - (countInRow - 1) / 2;
+        }
+
+        return {
+          x: Math.round(colOffset * colSpacing * 100) / 100,
+          z: Math.round((-2.2 - rowIndex * rowSpacing) * 100) / 100
+        };
+      }
       const cols = this.targetCount > 100 ? 16 : (this.targetCount > 30 ? 12 : 8);
       const col = (index - 1) % cols;
       const row = Math.floor((index - 1) / cols);
@@ -1204,10 +1291,51 @@
 
           // Kiểm tra xem có đang theo sau 1 người duy nhất hay không (Acc chính hoặc 1 đạo hữu cụ thể)
           const isSingleTarget = (targetPlayer.id === "master" || (this.followTargetId && this.followTargetId !== "auto"));
-          const useCorridor = this.corridorMode && isSingleTarget;
+          const useLecture = this.lectureMode && isSingleTarget;
+          const useCorridor = this.corridorMode && isSingleTarget && !useLecture;
 
-          let slotX, slotZ;
-          if (useCorridor) {
+          let slotX, slotZ, slotRy;
+          if (useLecture) {
+            // ĐỘI HÌNH NGỒI THEO HÀNG (NGHE THUYẾT PHÁP) - HÀNG NGANG HOẶC HÀNG DỌC
+            const readyFollowers = this.disciples.filter((x) => x.ready && x.ws && x.ws.readyState === WebSocket.OPEN);
+            const total = Math.max(1, readyFollowers.length);
+            const K = Math.min(total, Math.max(2, this.lectureRows || 3));
+
+            let rowIndex, colOffset;
+            const colSpacing = 1.15; // Khoảng cách giữa các đệ tử trong hàng ngang
+            const rowSpacing = 1.25; // Khoảng cách giữa các hàng trước - sau
+
+            if (this.lectureOrient === "doc") {
+              // XẾP THEO K HÀNG DỌC (CỘT)
+              const numCols = K;
+              rowIndex = Math.floor(localSlot / numCols);
+              const colIndex = localSlot % numCols;
+              colOffset = colIndex - (numCols - 1) / 2;
+            } else {
+              // XẾP THEO K HÀNG NGANG (MẶC ĐỊNH)
+              const numRows = K;
+              const cols = Math.ceil(total / numRows);
+              rowIndex = Math.floor(localSlot / cols);
+              const countInRow = Math.min(cols, total - rowIndex * cols);
+              const colIndex = localSlot % cols;
+              colOffset = colIndex - (countInRow - 1) / 2;
+            }
+
+            const baseDist = 1.6 + rowIndex * rowSpacing;
+
+            const isFacingFront = (this.lectureFacing === "front");
+            if (isFacingFront) {
+              // Ngồi trước mặt người giảng pháp, quay mặt lại 180 độ đối diện nhìn thẳng người giảng pháp
+              slotX = targetPlayer.x + fX * baseDist + rightX * (colOffset * colSpacing);
+              slotZ = targetPlayer.z + fZ * baseDist + rightZ * (colOffset * colSpacing);
+              slotRy = playerRy + Math.PI;
+            } else {
+              // Ngồi sau lưng người chơi, quay mặt cùng chiều với người chơi
+              slotX = targetPlayer.x - fX * baseDist + rightX * (colOffset * colSpacing);
+              slotZ = targetPlayer.z - fZ * baseDist + rightZ * (colOffset * colSpacing);
+              slotRy = playerRy;
+            }
+          } else if (useCorridor) {
             // ĐỘI HÌNH 2 HÀNG DANH DỰ THẲNG TẮP (TẠO LỐI ĐI Ở GIỮA)
             const isLeft = (localSlot % 2 === 0);
             const rowInCorridor = Math.floor(localSlot / 2);
@@ -1220,6 +1348,7 @@
             // Đứng song song 2 bên trục tiến của người chơi, thẳng hàng tuyệt đối:
             slotX = targetPlayer.x - fX * baseFollowDist + latX * corridorHalfWidth;
             slotZ = targetPlayer.z - fZ * baseFollowDist + latZ * corridorHalfWidth;
+            slotRy = playerRy;
           } else {
             // ĐỘI HÌNH HỘ TỐNG HÌNH CÁNH CUNG (MẶC ĐỊNH)
             const totalFollowers = targetPlayer.id === "master" ? this.getActiveCount() : 5;
@@ -1230,6 +1359,7 @@
 
             slotX = targetPlayer.x - fX * baseFollowDist + rightX * (col * 0.95);
             slotZ = targetPlayer.z - fZ * baseFollowDist + rightZ * (col * 0.95);
+            slotRy = playerRy;
           }
 
           const dx = slotX - d.pos.x;
@@ -1261,8 +1391,8 @@
               d.pos.x = Math.round((d.pos.x + (dx / distToSlot) * currentSpeed) * 100) / 100;
               d.pos.z = Math.round((d.pos.z + (dz / distToSlot) * currentSpeed) * 100) / 100;
             }
-            // Hướng mặt thẳng theo hướng người chơi để toàn đội hình đồng bộ thẳng tắp
-            d.pos.ry = Math.round(playerRy * 100) / 100;
+            // Hướng mặt theo slotRy
+            d.pos.ry = Math.round(slotRy * 100) / 100;
             const moveGroundY = getGroundY(d.pos.x, d.pos.z);
             d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
             d.lastStateSend = now;
@@ -1280,10 +1410,10 @@
             } catch {}
             return;
           } else {
-            // Đã ở ngay vị trí đích: giữ chuẩn xác tọa độ slot và quay mặt theo người chơi
+            // Đã ở ngay vị trí đích: giữ chuẩn xác tọa độ slot và quay mặt theo slotRy
             d.pos.x = Math.round(slotX * 100) / 100;
             d.pos.z = Math.round(slotZ * 100) / 100;
-            d.pos.ry = Math.round(playerRy * 100) / 100;
+            d.pos.ry = Math.round(slotRy * 100) / 100;
             const moveGroundY = getGroundY(d.pos.x, d.pos.z);
             d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
 
@@ -1506,7 +1636,8 @@
         let text = this.formationMode === "hall"
           ? "🏛️ Tập trung Chánh điện"
           : (this.followPlayer ? (this.followTargetId === "master" ? "🚶 Bám theo Acc chính" : "🚶 Bám theo đạo hữu") : "🏃 Đi dạo tự do khắp chùa");
-        if (this.followPlayer && this.corridorMode) text += " · 🛡️ 2 hàng";
+        if (this.followPlayer && this.lectureMode) text += ` · 🧘 ${this.lectureRows} hàng ${this.lectureOrient === "doc" ? "dọc" : "ngang"}`;
+        else if (this.followPlayer && this.corridorMode) text += " · 🛡️ 2 hàng";
         if (this.airWalk) text += " · ☁️ Khinh công";
         modeBadge.textContent = text;
         modeBadge.style.color = this.airWalk ? "#c084fc" : (this.formationMode === "hall" ? "#e5bc72" : (this.followPlayer ? "#38bdf8" : "#34d399"));
@@ -1522,6 +1653,42 @@
       const chkCorridor = $("#atd-chk-corridor");
       if (chkCorridor) {
         chkCorridor.checked = this.corridorMode;
+      }
+      const chkLecture = $("#atd-chk-lecture");
+      if (chkLecture) {
+        chkLecture.checked = this.lectureMode;
+      }
+      const lectureWrap = $("#atd-lecture-config-wrap");
+      if (lectureWrap) {
+        lectureWrap.style.display = this.lectureMode ? "block" : "none";
+      }
+      const inputLectureRows = $("#atd-input-lecture-rows");
+      if (inputLectureRows && document.activeElement !== inputLectureRows) {
+        inputLectureRows.value = this.lectureRows;
+      }
+      $$("input[name='atd-lecture-orient']").forEach((r) => {
+        r.checked = (r.value === this.lectureOrient);
+      });
+      const lblRows = $("#atd-lecture-rows-label");
+      if (lblRows) {
+        lblRows.textContent = this.lectureOrient === "doc" ? "Số hàng dọc (> 2):" : "Số hàng ngang (> 2):";
+      }
+      $$(".atd-lecture-preset-btn").forEach((btn) => {
+        btn.textContent = this.lectureOrient === "doc" ? `${btn.dataset.rows} hàng dọc` : `${btn.dataset.rows} hàng ngang`;
+      });
+      $$("input[name='atd-lecture-facing']").forEach((r) => {
+        r.checked = (r.value === this.lectureFacing);
+      });
+      const lectureHint = $("#atd-lecture-calc-hint");
+      if (lectureHint) {
+        const totalD = this.enabled ? Math.max(1, readyCount) : this.targetCount;
+        const K = Math.min(totalD, Math.max(2, this.lectureRows || 3));
+        const other = Math.ceil(totalD / K);
+        if (this.lectureOrient === "doc") {
+          lectureHint.textContent = `✨ Tự chia đều ${totalD} đệ tử ➔ ${K} hàng dọc (mỗi hàng dài ~${other} đệ tử xếp thẳng ra sau)`;
+        } else {
+          lectureHint.textContent = `✨ Tự chia đều ${totalD} đệ tử ➔ ${K} hàng ngang (mỗi hàng ~${other} đệ tử ngồi cạnh nhau)`;
+        }
       }
       const chkRandomLook = $("#atd-headless-randomlook");
       if (chkRandomLook) {
@@ -5596,6 +5763,59 @@
                     <span>🛡️ <b>Xếp 2 hàng tạo lối đi ở giữa</b> (Danh dự)</span>
                   </label>
                 </div>
+                <!-- Chức năng Ngồi theo hàng (Nghe thuyết pháp) -->
+                <div style="margin-top:7px; padding-top:6px; border-top:1px dashed rgba(56,189,248,0.25);">
+                  <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <label class="atd-lecture-label" title="Cho các đệ tử ngồi ngay ngắn theo từng hàng (tương tự thính chúng ngồi nghe thuyết pháp / tọa thiền)">
+                      <input type="checkbox" id="atd-chk-lecture" />
+                      <span>🧘 <b>Ngồi theo hàng</b> (Nghe thuyết pháp)</span>
+                    </label>
+                  </div>
+                  <div id="atd-lecture-config-wrap" style="display:none; margin-top:5px; padding:6px 8px; background:rgba(30,41,59,0.7); border:1px solid rgba(168,85,247,0.3); border-radius:5px;">
+                    <!-- Lựa chọn Hàng ngang vs Hàng dọc -->
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; padding-bottom:5px; border-bottom:1px dashed rgba(168,85,247,0.25);">
+                      <span style="font-size:11px; color:#e2e8f0; font-weight:600;">Kiểu xếp hàng:</span>
+                      <div style="display:flex; gap:10px; font-size:11px;">
+                        <label style="display:flex; align-items:center; gap:3px; cursor:pointer; color:#f3e8ff;">
+                          <input type="radio" name="atd-lecture-orient" value="ngang" checked style="accent-color:#a855f7; margin:0;" />
+                          <span>↔️ <b>Hàng ngang</b></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:3px; cursor:pointer; color:#cbd5e1;">
+                          <input type="radio" name="atd-lecture-orient" value="doc" style="accent-color:#a855f7; margin:0;" />
+                          <span>↕️ <b>Hàng dọc</b></span>
+                        </label>
+                      </div>
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                      <span id="atd-lecture-rows-label" style="font-size:11px; color:#e2e8f0;">Nhập số hàng ngang (&gt; 2):</span>
+                      <div style="display:flex; align-items:center; gap:4px;">
+                        <button type="button" id="atd-btn-lecture-row-dec" style="padding:1px 6px; font-size:11px; font-weight:bold; background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#c084fc; border-radius:3px; cursor:pointer;">-</button>
+                        <input type="number" id="atd-input-lecture-rows" min="2" max="30" value="3" style="width:42px; text-align:center; padding:2px 4px; font-size:11px; font-weight:bold; background:rgba(15,23,42,0.9); color:#f3e8ff; border:1px solid rgba(168,85,247,0.4); border-radius:4px; outline:none;" />
+                        <button type="button" id="atd-btn-lecture-row-inc" style="padding:1px 6px; font-size:11px; font-weight:bold; background:rgba(168,85,247,0.2); border:1px solid rgba(168,85,247,0.4); color:#c084fc; border-radius:3px; cursor:pointer;">+</button>
+                      </div>
+                    </div>
+                    <div style="display:flex; gap:4px; margin-top:5px;">
+                      <button type="button" class="atd-lecture-preset-btn" data-rows="3" style="flex:1; padding:2px 4px; font-size:10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.3); color:#d8b4fe; border-radius:3px; cursor:pointer;">3 hàng</button>
+                      <button type="button" class="atd-lecture-preset-btn" data-rows="4" style="flex:1; padding:2px 4px; font-size:10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.3); color:#d8b4fe; border-radius:3px; cursor:pointer;">4 hàng</button>
+                      <button type="button" class="atd-lecture-preset-btn" data-rows="5" style="flex:1; padding:2px 4px; font-size:10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.3); color:#d8b4fe; border-radius:3px; cursor:pointer;">5 hàng</button>
+                      <button type="button" class="atd-lecture-preset-btn" data-rows="6" style="flex:1; padding:2px 4px; font-size:10px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.3); color:#d8b4fe; border-radius:3px; cursor:pointer;">6 hàng</button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; margin-top:6px; font-size:10.5px; color:#cbd5e1;">
+                      <span>Vị trí ngồi:</span>
+                      <label style="display:flex; align-items:center; gap:3px; cursor:pointer; color:#f3e8ff;">
+                        <input type="radio" name="atd-lecture-facing" value="front" checked style="accent-color:#a855f7; margin:0;" />
+                        <span>Trước mặt (Đối diện)</span>
+                      </label>
+                      <label style="display:flex; align-items:center; gap:3px; cursor:pointer; color:#cbd5e1;">
+                        <input type="radio" name="atd-lecture-facing" value="behind" style="accent-color:#a855f7; margin:0;" />
+                        <span>Sau lưng</span>
+                      </label>
+                    </div>
+                    <div id="atd-lecture-calc-hint" style="font-size:10px; color:#e9d5ff; margin-top:5px; font-style:italic;">
+                      ✨ Tự chia đều đệ tử theo số hàng đã nhập
+                    </div>
+                  </div>
+                </div>
                 <div style="margin-top:8px; padding-top:7px; border-top:1px dashed rgba(56,189,248,0.25);">
                   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                     <span style="font-size:11px; color:#fde68a; font-weight:600;">💬 Chat chào theo tên người được chọn:</span>
@@ -5901,6 +6121,68 @@
         headlessDisciples.setCorridorMode(chkCorridor.checked);
       });
     }
+
+    const chkLecture = $("#atd-chk-lecture", panel);
+    if (chkLecture) {
+      chkLecture.checked = headlessDisciples.lectureMode;
+      chkLecture.addEventListener("change", () => {
+        headlessDisciples.setLectureMode(chkLecture.checked);
+      });
+    }
+
+    const inputLectureRows = $("#atd-input-lecture-rows", panel);
+    if (inputLectureRows) {
+      inputLectureRows.value = headlessDisciples.lectureRows;
+      inputLectureRows.addEventListener("change", () => {
+        headlessDisciples.setLectureRows(inputLectureRows.value);
+      });
+      inputLectureRows.addEventListener("input", () => {
+        const val = parseInt(inputLectureRows.value, 10);
+        if (!isNaN(val) && val >= 2) {
+          headlessDisciples.setLectureRows(val);
+        }
+      });
+    }
+
+    const btnRowDec = $("#atd-btn-lecture-row-dec", panel);
+    if (btnRowDec) {
+      btnRowDec.addEventListener("click", () => {
+        if (headlessDisciples.lectureRows > 2) {
+          headlessDisciples.setLectureRows(headlessDisciples.lectureRows - 1);
+        }
+      });
+    }
+    const btnRowInc = $("#atd-btn-lecture-row-inc", panel);
+    if (btnRowInc) {
+      btnRowInc.addEventListener("click", () => {
+        headlessDisciples.setLectureRows(headlessDisciples.lectureRows + 1);
+      });
+    }
+
+    $$(".atd-lecture-preset-btn", panel).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = parseInt(btn.dataset.rows, 10);
+        if (!isNaN(r) && r >= 2) {
+          headlessDisciples.setLectureRows(r);
+        }
+      });
+    });
+
+    $$("input[name='atd-lecture-orient']", panel).forEach((radio) => {
+      radio.addEventListener("change", () => {
+        if (radio.checked) {
+          headlessDisciples.setLectureOrient(radio.value);
+        }
+      });
+    });
+
+    $$("input[name='atd-lecture-facing']", panel).forEach((radio) => {
+      radio.addEventListener("change", () => {
+        if (radio.checked) {
+          headlessDisciples.setLectureFacing(radio.value);
+        }
+      });
+    });
 
     const selFollow = $("#atd-select-follow-target", panel);
     if (selFollow) {
