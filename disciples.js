@@ -1150,6 +1150,16 @@ function adjustDiscipleCount(newCount) {
 
 let isShoutingGreeting = false;
 
+function getCurrentTargetPlayer() {
+  const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+  if (players.length === 0) return null;
+  if (followTargetName) {
+    const found = players.find((p) => p.name && p.name.toLowerCase().includes(followTargetName.toLowerCase()));
+    if (found) return found;
+  }
+  return players[0];
+}
+
 function formatGreetingMessage(customMsg) {
   let tpl = (customMsg || "Chào").trim();
   if (!greetIncludeName) {
@@ -1158,8 +1168,7 @@ function formatGreetingMessage(customMsg) {
     }
     return tpl;
   }
-  const otherPlayers = Array.from(knownPlayers.values());
-  const targetPlayer = otherPlayers.length > 0 ? otherPlayers[0] : null;
+  const targetPlayer = getCurrentTargetPlayer();
   const targetName = targetPlayer ? (targetPlayer.name || "Đạo hữu") : "Sư phụ";
   if (/{name}|{ten}/i.test(tpl)) {
     return tpl.replace(/{name}|{ten}/gi, targetName);
@@ -1221,6 +1230,8 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'roam' + Enter\x1b[0m         : Cho đệ tử tản ra đi dạo tự do khắp bản đồ chùa");
   console.log("  • \x1b[1;33mGõ 'hall' + Enter\x1b[0m         : Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng");
   console.log("  • \x1b[1;33mGõ 'air' hoặc 'fly' + Enter\x1b[0m : Bật/tắt chế độ Đi trên không (Khinh công)");
+  console.log("  • \x1b[1;33mGõ 'list' hoặc 'players'\x1b[0m   : Xem danh sách người trong chùa (kèm số thứ tự)");
+  console.log("  • \x1b[1;33mGõ 'target <số hoặc tên>'\x1b[0m : Chọn người để 100 đệ tử bám theo (VD: target 1)");
   console.log("  • \x1b[1;33mGõ 'follow' hoặc 'f' + Enter\x1b[0m: Bật/tắt chế độ Tự đi theo người chơi khác");
   console.log("  • \x1b[1;33mGõ 'corridor' hoặc 'hang2'\x1b[0m   : Bật/tắt đội hình 2 hàng danh dự tạo lối đi");
   console.log("  • \x1b[1;33mGõ 'rows <số hàng>' hoặc 'hang <n>'\x1b[0m: Ngồi theo hàng nghe thuyết pháp (VD: rows 4)");
@@ -1399,14 +1410,35 @@ rl.on("line", (line) => {
     autoFreeProxy = false;
     console.log("\x1b[33m[PROXY] Đã TẮT proxy, chuyển về kết nối trực tiếp!\x1b[0m");
     disciples.forEach((d) => d.reconnect());
+  } else if (cmd === "players" || cmd === "list" || cmd === "danhsach" || cmd === "peers") {
+    const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+    console.log("\n\x1b[1;36m📋 DANH SÁCH ĐẠO HỮU ĐANG CÓ MẶT TRONG CHÙA:\x1b[0m");
+    if (players.length === 0) {
+      console.log("  (Chưa có đạo hữu nào khác trong phòng)\n");
+    } else {
+      players.forEach((p, idx) => {
+        const isCurrent = (followTargetName && p.name && p.name.toLowerCase().includes(followTargetName.toLowerCase()));
+        const mark = isCurrent ? " \x1b[32m[ĐANG BÁM THEO]\x1b[0m" : "";
+        console.log(`  \x1b[1;33m[${idx + 1}]\x1b[0m ${p.name || "Đạo hữu"} (ID: ${p.id})${mark}`);
+      });
+      console.log(`\n👉 Gõ \x1b[1;32mtarget <số hoặc tên>\x1b[0m để điều động 100 đệ tử bám theo người đó! (VD: target 1 hoặc target ${players[0]?.name || "tên"})\n`);
+    }
   } else if (cmd.startsWith("target ") || cmd === "target") {
     const rawT = line.trim().replace(/^target\s*/, "").trim();
-    if (!rawT || rawT === "auto" || rawT === "all") {
+    const players = Array.from(roomOtherPlayers.values()).filter((p) => !isOurDisciple(p.id, p.name));
+    if (!rawT || rawT === "auto" || rawT === "all" || rawT === "me") {
       followTargetName = "";
       console.log(`\x1b[36m[MỤC TIÊU] Đã chuyển về tự động tập trung theo Acc chính trong chùa!\x1b[0m`);
     } else {
-      followTargetName = rawT;
-      console.log(`\x1b[36m[MỤC TIÊU] Đã đặt mục tiêu bám theo: "${followTargetName}"!\x1b[0m`);
+      const numIdx = parseInt(rawT, 10);
+      if (!isNaN(numIdx) && numIdx >= 1 && numIdx <= players.length) {
+        const chosen = players[numIdx - 1];
+        followTargetName = chosen.name;
+        console.log(`\x1b[32m[MỤC TIÊU] Đã chọn [${numIdx}] ${chosen.name} (ID: ${chosen.id})! Toàn bộ đệ tử đang di chuyển bám theo...\x1b[0m`);
+      } else {
+        followTargetName = rawT;
+        console.log(`\x1b[32m[MỤC TIÊU] Đã đặt mục tiêu bám theo: "${followTargetName}"! Toàn bộ đệ tử đang di chuyển bám theo...\x1b[0m`);
+      }
     }
     if (!followPlayer) {
       followPlayer = true;
