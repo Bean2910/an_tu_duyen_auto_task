@@ -28,7 +28,7 @@ if exist proxies.txt (
     )
 )
 
-echo Đang khởi động 100 đệ tử chạy qua kho 3.000+ Proxy SOCKS5 miễn phí...
+echo Đang khởi động 100 đệ tử chạy qua kho 3.000+ Proxy SOCKS5 sống (Vượt giới hạn IP)...
 echo Đệ tử sẽ tự động vào phòng chùa, tự bám theo và tự lạy cùng Acc chính!
 echo.
 node disciples.js --count=100 --free-proxy --follow --auto --hang=5

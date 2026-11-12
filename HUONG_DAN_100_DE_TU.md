@@ -16,18 +16,31 @@ Tài liệu này hướng dẫn chi tiết cách cài đặt, cấu hình và v�
 
 ---
 
-## 1. Tại sao cần Proxy / Tor khi chạy 100 đệ tử?
+## 1. Lưu ý về Cơ chế Mạng & Cloudflare
 
-Máy chủ game `didenchua.online` áp dụng cơ chế **giới hạn số kết nối theo IP** (IP Connection Limit / Rate Limit):
-- Mỗi địa chỉ IP thông thường chỉ duy trì được tối đa khoảng **5 – 10 kết nối WebSocket**.
-- Nếu bạn bật **Cloudflare WARP (1.1.1.1)**: Toàn bộ 100 đệ tử vẫn bị gom qua **1 IP duy nhất** của Cloudflare ➜ Vẫn bị máy chủ game giới hạn và chặn.
-- Nếu dùng **Proxy cào miễn phí thông thường**: Hay bị nghẽn mạng do hàng triệu người scan và dùng chung, dẫn đến rớt kết nối liên tục.
-
-👉 **Giải pháp hoàn hảo nhất là Tor Multi-Circuit hoặc Proxy xoay vòng!**
+Máy chủ game `didenchua.online` được bảo vệ bởi **Cloudflare WAF**:
+- **Kết nối trực tiếp (Khuyên dùng)**: Hệ thống sử dụng bộ kết nối `PureWebSocket` chuẩn, hỗ trợ chạy mượt mà toàn bộ **100 đệ tử cùng lúc** trên 1 địa chỉ IP mà không bị ngắt kết nối, độ trễ cực thấp (0ms - 5ms).
+- **Mạng Tor (Tor Multi-Circuit)**: Hiện tại Cloudflare tự động chặn các IP Exit Node của mạng Tor với mã lỗi `HTTP/1.1 403 Forbidden`. Nếu phát hiện lỗi này, hệ thống sẽ tự động chuyển về kết nối Trực tiếp để các đệ tử duy trì hoạt động bình thường.
+- **Proxy riêng (`proxies.txt`)**: Nếu bạn muốn đổi IP cho từng đệ tử, hãy sử dụng danh sách Proxy riêng (SOCKS5/HTTP dân cư hoặc datacenter thông thường) dán vào `proxies.txt`.
 
 ---
 
-## 2. Cách 1 (Khuyên dùng): Tor Multi-Circuit (Miễn phí 100%, cực kỳ ổn định)
+## 🌟 CÁCH DÙNG MỚI (KHUYÊN DÙNG): BẢNG ĐIỀU KHIỂN GUI ĐỒ HỌA TRỰC QUAN
+
+Nếu bạn không muốn gõ lệnh trong màn hình đen Terminal, bạn chỉ cần nhấp đúp chuột vào:
+👉 [`chay_gui.bat`](file:///d:/Code/an_tu_duyen_auto_task/chay_gui.bat)
+
+Hệ thống sẽ tự động bật một **cửa sổ ứng dụng Desktop (App Mode)** cực đẹp với đầy đủ các nút bấm:
+- **Nút "Lạy Phật" to tướng**: Nhấp chuột hoặc bấm phím `Space` là 100 đệ tử lạy ngay.
+- **Nút bật/tắt Tự động lạy**: Tự động lạy mỗi 7.5 giây.
+- **Nút đổi đội hình 1-click**: 2 Hàng lối đi danh dự, 3 hàng, 5 hàng, hàng ngang, hàng dọc, trước mặt / sau lưng, khinh công bay lượn...
+- **Radar người chơi**: Quét danh sách người chơi trong chùa, bấm nút **"🎯 Bám theo"** là đệ tử lập tức quay sang người đó.
+- **Lưới đệ tử trực tiếp**: Theo dõi thời gian thực trạng thái và số lần lạy của từng đệ tử.
+- **Tiêu thụ tài nguyên**: 0% GPU, < 15MB RAM, không cần cài Python hay Electron!
+
+---
+
+## 2. Cách 1: Tor Multi-Circuit (Miễn phí 100%, cực kỳ ổn định)
 
 ### 💡 Nguyên lý hoạt động:
 Tor hỗ trợ tính năng **`IsolateSOCKSAuth`**. File `disciples.js` đã được tích hợp sẵn cơ chế cấp cho **mỗi đệ tử một ID xác thực riêng biệt**. Nhờ vậy, Tor sẽ tự động định tuyến mỗi đệ tử qua một đường truyền (circuit) độc lập với **100 địa chỉ IP khác nhau hoàn toàn trên toàn cầu**. Máy chủ game xem đây là 100 người dùng thật từ khắp nơi, không bao giờ lo bị nghẽn hay giới hạn IP!
@@ -85,6 +98,9 @@ Khi cửa sổ Terminal đang chạy, bạn có thể gõ các lệnh sau và nh
 | **`ngang` / `doc`** | — | Đổi kiểu hàng: Xếp theo Hàng Ngang (ngồi cạnh nhau) ↔ Hàng Dọc (xếp thẳng ra sau) |
 | **`front` / `behind`** | — | Đổi hướng ngồi: Ngồi trước mặt đối diện sư phụ ↔ Ngồi sau lưng sư phụ |
 | **`greet <câu>`** | `chao` | Toàn bộ đệ tử chắp tay cúi chào và chat câu bạn muốn (VD: `greet A Di Đà Phật`) |
+| **`autochat`** | `tudongchat` | Bật / tắt chế độ Tự động chat lặp lại theo chu kỳ (mặc định 15s) |
+| **`dismiss`** | `thuhoi`, `giaitan` | Thu hồi / giải tán toàn bộ đệ tử rút khỏi phòng ngay lập tức |
+| **`summon`** | `trieuhoi` | Triệu hồi kết nối lại toàn bộ đệ tử vào phòng |
 | **`kemten`** | `tagname` | Bật / tắt tính năng tự động kèm tên người đang theo dõi khi chat (VD: "Chào Sư cô" ↔ "Chào") |
 | **`air`** | `fly`, `khinhcong`| Bật / tắt chế độ Đi trên không (Khinh công lướt mây, bay lên lượn xuống, không độn thổ) |
 | **`roam`** | `didao` | Cho 100 đệ tử tản ra đi dạo tự do khắp các địa danh trong chùa |

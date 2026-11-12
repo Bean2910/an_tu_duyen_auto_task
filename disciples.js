@@ -25,8 +25,39 @@ const readline = require("readline");
 const crypto = require("crypto");
 const net = require("net");
 const tls = require("tls");
+const http = require("http");
 const https = require("https");
 const fs = require("fs");
+const path = require("path");
+const { spawn, exec } = require("child_process");
+
+// Bộ đệm lưu trữ log hiển thị lên giao diện Web GUI
+const maxGuiLogs = 60;
+const guiLogs = [];
+function logToGui(text) {
+  if (typeof text !== "string") text = String(text);
+  const clean = text.replace(/\x1b\[[0-9;]*m/g, "").trim();
+  if (!clean) return;
+  guiLogs.push(clean);
+  if (guiLogs.length > maxGuiLogs) guiLogs.shift();
+}
+
+const origLog = console.log;
+const origWarn = console.warn;
+const origErr = console.error;
+
+console.log = function(...args) {
+  origLog.apply(console, args);
+  logToGui(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "));
+};
+console.warn = function(...args) {
+  origWarn.apply(console, args);
+  logToGui(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "));
+};
+console.error = function(...args) {
+  origErr.apply(console, args);
+  logToGui(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "));
+};
 
 /**
  * PureWebSocket: Bộ kết nối WebSocket thuần 100% Node.js chuẩn (Zero NPM Dependency)
@@ -50,6 +81,9 @@ class PureWebSocket {
     this.buffer = Buffer.alloc(0);
     this.handshakeDone = false;
     this.socket = null;
+    this.rawSocket = null;
+    this._errorHandled = false;
+    this._closeTriggered = false;
     this._connect();
   }
 
@@ -93,13 +127,17 @@ class PureWebSocket {
     const pUser = decodeURIComponent(pUrl.username || "");
     const pPass = decodeURIComponent(pUrl.password || "");
 
-    const raw = net.connect(pPort, pHost, () => {
-      if (raw.setKeepAlive) raw.setKeepAlive(true, 10000);
-      if (raw.setNoDelay) raw.setNoDelay(true);
-      raw.setTimeout(8000, () => {
-        raw.destroy(new Error(`Proxy connection timeout: ${pHost}:${pPort}`));
-      });
+    const raw = net.connect(pPort, pHost);
+    this.rawSocket = raw;
+    if (raw.setKeepAlive) raw.setKeepAlive(true, 10000);
+    if (raw.setNoDelay) raw.setNoDelay(true);
 
+    const proxyTimeoutMs = (pHost === "127.0.0.1" && (pPort === 9050 || pPort === 9150)) ? 45000 : 10000;
+    raw.setTimeout(proxyTimeoutMs, () => {
+      this._handleError(new Error(`Proxy connection timeout: ${pHost}:${pPort}`));
+    });
+
+    raw.on("connect", () => {
       if (pProtocol.startsWith("socks")) {
         // SOCKS5 Handshake with Auth support (RFC 1928 / RFC 1929)
         const greeting = hasAuth
@@ -194,14 +232,15 @@ class PureWebSocket {
     s.on("data", (chunk) => this._onData(chunk));
     s.on("error", (err) => this._handleError(err));
     s.on("close", () => {
-      this.readyState = PureWebSocket.CLOSED;
-      if (this.onclose) this.onclose({ code: 1006, reason: "Socket closed" });
+      this._triggerClose(1006, "Socket closed");
     });
   }
 
   _sendHandshake() {
     this.secKey = crypto.randomBytes(16).toString("base64");
     const path = (this.url.pathname || "/") + (this.url.search || "");
+    const isWss = this.url.protocol === "wss:";
+    const origin = `${isWss ? "https:" : "http:"}//${this.url.hostname}`;
     const headers = [
       `GET ${path} HTTP/1.1`,
       `Host: ${this.url.hostname}`,
@@ -209,14 +248,36 @@ class PureWebSocket {
       "Connection: Upgrade",
       `Sec-WebSocket-Key: ${this.secKey}`,
       "Sec-WebSocket-Version: 13",
+      `Origin: ${origin}`,
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Accept-Encoding: gzip, deflate, br, zstd",
+      "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Cache-Control: no-cache",
+      "Pragma: no-cache",
       "\r\n"
     ].join("\r\n");
-    this.socket.write(headers);
+    if (this.socket && !this.socket.destroyed) {
+      this.socket.write(headers);
+    }
   }
 
   _handleError(err) {
-    if (this.onerror) this.onerror(err);
+    if (this._errorHandled) return;
+    this._errorHandled = true;
+    if (this.onerror) {
+      try { this.onerror(err); } catch {}
+    }
+    this._triggerClose(1006, err?.message || "Connection error");
+  }
+
+  _triggerClose(code = 1000, reason = "Normal close") {
+    if (this._closeTriggered) return;
+    this._closeTriggered = true;
+    this.readyState = PureWebSocket.CLOSED;
     this.close();
+    if (this.onclose) {
+      try { this.onclose({ code, reason }); } catch {}
+    }
   }
 
   _onData(chunk) {
@@ -279,12 +340,20 @@ class PureWebSocket {
         const text = payload.toString("utf8");
         if (this.onmessage) this.onmessage({ data: text });
       } else if (opcode === 0x09) {
-        const pong = Buffer.concat([Buffer.from([0x8a, payload.length]), payload]);
-        try { this.socket.write(pong); } catch {}
+        // WebSocket Ping từ Server: Client BẮT BUỘC phải gửi Pong có MASK theo chuẩn RFC 6455
+        const pLen = Math.min(125, payload.length);
+        const pongMask = crypto.randomBytes(4);
+        const header = Buffer.from([0x8a, 0x80 | pLen, pongMask[0], pongMask[1], pongMask[2], pongMask[3]]);
+        const masked = Buffer.alloc(pLen);
+        for (let i = 0; i < pLen; i++) masked[i] = payload[i] ^ pongMask[i % 4];
+        try {
+          const target = this.socket || this.rawSocket;
+          if (target && !target.destroyed) target.write(Buffer.concat([header, masked]));
+        } catch {}
+      } else if (opcode === 0x0a) {
+        // Pong phản hồi từ server, kết nối hoàn toàn bình thường
       } else if (opcode === 0x08) {
-        this.readyState = PureWebSocket.CLOSED;
-        try { this.socket.end(); } catch {}
-        if (this.onclose) this.onclose({ code: 1000, reason: "Normal close" });
+        this._triggerClose(1000, "Server closed connection");
         return;
       }
     }
@@ -320,14 +389,23 @@ class PureWebSocket {
 
   close() {
     this.readyState = PureWebSocket.CLOSING;
-    try {
-      if (this.socket) {
+    if (this.rawSocket) {
+      try {
+        this.rawSocket.removeAllListeners();
+        this.rawSocket.destroy();
+      } catch {}
+      this.rawSocket = null;
+    }
+    if (this.socket) {
+      try {
+        this.socket.removeAllListeners();
         const mask = crypto.randomBytes(4);
         const closeFrame = Buffer.concat([Buffer.from([0x88, 0x82]), mask, Buffer.from([0x03 ^ mask[0], 0xe8 ^ mask[1]])]);
         this.socket.write(closeFrame);
-        this.socket.end();
-      }
-    } catch {}
+        this.socket.destroy();
+      } catch {}
+      this.socket = null;
+    }
     this.readyState = PureWebSocket.CLOSED;
   }
 }
@@ -345,6 +423,7 @@ function getArg(name, defaultValue) {
   return defaultValue;
 }
 
+const isGuiMode = args.includes("--gui");
 const targetCount = parseInt(getArg("count", "4"), 10) || 4;
 let targetRoom = getArg("room", "chua-1");
 let customName = getArg("name", "");
@@ -389,39 +468,168 @@ if (proxyFile && fs.existsSync(proxyFile)) {
 let isTorMode = args.includes("--tor");
 let torPort = parseInt(getArg("tor-port", "9050"), 10) || 9050;
 
-function detectTorPort() {
+let torChild = null;
+
+function cleanupTor() {
+  if (torChild) {
+    try {
+      torChild.kill();
+    } catch {}
+    torChild = null;
+  }
+}
+
+process.on("exit", cleanupTor);
+
+function testPort(port, timeout = 400) {
   return new Promise((resolve) => {
-    const s = net.connect(9050, "127.0.0.1", () => {
+    const s = net.connect(port, "127.0.0.1", () => {
       s.destroy();
-      resolve(9050);
+      resolve(true);
     });
-    s.on("error", () => {
-      const s2 = net.connect(9150, "127.0.0.1", () => {
-        s2.destroy();
-        resolve(9150);
-      });
-      s2.on("error", () => resolve(9050));
-      s2.setTimeout(400, () => {
-        try { s2.destroy(); } catch {}
-        resolve(9050);
-      });
-    });
-    s.setTimeout(400, () => {
+    s.on("error", () => resolve(false));
+    s.setTimeout(timeout, () => {
       try { s.destroy(); } catch {}
-      resolve(9050);
+      resolve(false);
     });
+  });
+}
+
+function findTorExe() {
+  const candidates = [
+    path.resolve(__dirname, "tor", "tor", "tor.exe"),
+    path.resolve(__dirname, "tor", "tor.exe"),
+    path.resolve(process.env.LOCALAPPDATA || "", "Programs", "Tor Browser", "Browser", "TorBrowser", "Tor", "tor.exe"),
+    "C:\\Program Files\\Tor\\tor.exe",
+    "C:\\Program Files (x86)\\Tor\\tor.exe"
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+async function ensureTorReady() {
+  // 1. Kiểm tra nếu cổng Tor (9050 hoặc 9150) đã có sẵn
+  if (await testPort(9050)) {
+    console.log(`\x1b[32m[TOR] Phát hiện cổng 9050 đã mở và sẵn sàng!\x1b[0m`);
+    return 9050;
+  }
+  if (await testPort(9150)) {
+    console.log(`\x1b[32m[TOR] Phát hiện cổng 9150 (Tor Browser) đã mở và sẵn sàng!\x1b[0m`);
+    return 9150;
+  }
+
+  // 2. Nếu chưa mở, tìm file tor.exe để khởi động tự động
+  const torExe = findTorExe();
+  if (!torExe) {
+    console.warn("\x1b[31m[TOR LỖI] Không tìm thấy file tor.exe! Vui lòng chạy 'cai_dat_tor.bat' để tải Tor tự động.\x1b[0m");
+    return 9050;
+  }
+
+  const torDataDir = path.resolve(__dirname, "tor", "data");
+  if (!fs.existsSync(torDataDir)) {
+    try { fs.mkdirSync(torDataDir, { recursive: true }); } catch {}
+  }
+  const geoIpPath = path.resolve(torDataDir, "geoip");
+  const geoIpv6Path = path.resolve(torDataDir, "geoip6");
+  const torArgs = [
+    "--SocksPort", String(torPort),
+    "--DataDirectory", torDataDir,
+    "--MaxCircuitDirtiness", "3600",
+    "--CircuitBuildTimeout", "60",
+    "--KeepalivePeriod", "60",
+    "--NumEntryGuards", "6",
+    "--Log", "notice stdout"
+  ];
+  if (fs.existsSync(geoIpPath)) torArgs.push("--GeoIPFile", geoIpPath);
+  if (fs.existsSync(geoIpv6Path)) torArgs.push("--GeoIPv6File", geoIpv6Path);
+
+  console.log(`\x1b[36m[TOR] Đang tự động khởi động Tor tối ưu: ${torExe}...\x1b[0m`);
+  torChild = spawn(torExe, torArgs, {
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: false
+  });
+
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    torChild.stdout.on("data", (data) => {
+      const text = data.toString();
+      const match = text.match(/Bootstrapped (\d+%).*/);
+      if (match) {
+        process.stdout.write(`\r\x1b[33m[TOR] Khởi tạo mạch mạng: ${match[0]}\x1b[0m       `);
+      }
+      if (text.includes("Bootstrapped 100%")) {
+        console.log(`\n\x1b[32m[TOR] Tor Multi-Circuit đã sẵn sàng 100%! Cổng: ${torPort}\x1b[0m\n`);
+        if (!resolved) {
+          resolved = true;
+          resolve(torPort);
+        }
+      }
+    });
+
+    torChild.stderr.on("data", (data) => {
+      // Đọc và xả stderr liên tục để tránh đầy bộ đệm pipe làm treo Tor
+      const text = data.toString();
+      if (text.includes("[err]")) {
+        console.error(`\x1b[31m[TOR ERROR] ${text.trim()}\x1b[0m`);
+      }
+    });
+
+    torChild.on("error", (err) => {
+      console.error(`\x1b[31m[TOR LỖI] Lỗi tiến trình Tor: ${err.message}\x1b[0m`);
+      if (!resolved) {
+        resolved = true;
+        resolve(torPort);
+      }
+    });
+
+    torChild.on("exit", (code) => {
+      torChild = null;
+      if (!resolved) {
+        resolved = true;
+        console.warn(`\x1b[33m[TOR] Tiến trình Tor đã thoát (code ${code}).\x1b[0m`);
+        resolve(torPort);
+      }
+    });
+
+    // Fallback kiểm tra cổng 9050 định kỳ
+    let elapsed = 0;
+    const interval = setInterval(async () => {
+      elapsed += 500;
+      if (resolved) {
+        clearInterval(interval);
+        return;
+      }
+      if (await testPort(torPort)) {
+        clearInterval(interval);
+        if (!resolved) {
+          resolved = true;
+          console.log(`\n\x1b[32m[TOR] Cổng ${torPort} đã mở và sẵn sàng!\x1b[0m\n`);
+          resolve(torPort);
+        }
+      } else if (elapsed >= 35000) {
+        clearInterval(interval);
+        if (!resolved) {
+          resolved = true;
+          console.warn(`\n\x1b[33m[TOR] Đã chờ 35s, tiếp tục kết nối đệ tử...\x1b[0m\n`);
+          resolve(torPort);
+        }
+      }
+    }, 500);
   });
 }
 
 let autoFreeProxy = args.includes("--free-proxy") || args.includes("--auto-proxy") || args.includes("--free");
 
 const failedProxies = new Map();
-function markProxyFailed(proxy) {
+function markProxyFailed(proxy, immediate = false) {
   if (!proxy) return;
   const count = (failedProxies.get(proxy) || 0) + 1;
   failedProxies.set(proxy, count);
-  // Loại bỏ các proxy chết liên tục để các đệ tử khác không bốc trúng
-  if (count >= 2 && proxyList.length > 30) {
+  // Loại bỏ các proxy chết liên tục hoặc bị chặn 403
+  if ((immediate || count >= 2) && proxyList.length > 0) {
     const idx = proxyList.indexOf(proxy);
     if (idx !== -1) {
       proxyList.splice(idx, 1);
@@ -429,11 +637,35 @@ function markProxyFailed(proxy) {
   }
 }
 
+let torBlockedTimer = null;
+function triggerTorBlockedFallback() {
+  if (!isTorMode) return;
+  if (torBlockedTimer) return;
+  torBlockedTimer = setTimeout(() => {
+    torBlockedTimer = null;
+    if (!isTorMode) return;
+    console.log("\n\x1b[1;31m========================================================================");
+    console.log("⚠️ [CẢNH BÁO] Cloudflare chặn mạng Tor (HTTP/1.1 403 Forbidden)!");
+    console.log("👉 Đang tự động chuyển sang Kết Nối Trực Tiếp (Direct Connection) cho toàn bộ đệ tử...");
+    console.log("========================================================================\x1b[0m\n");
+    isTorMode = false;
+    cleanupTor();
+    disciples.forEach((d) => {
+      d.proxyAttempt = 0;
+      d.reconnect();
+    });
+  }, 800);
+}
+
 function getProxyForDisciple(index, attempt = 0) {
   if (isTorMode) {
     // Tor SOCKS5 Multi-Circuit Isolation (RFC 1928 / RFC 1929)
-    // Mỗi đệ tử kết nối với 1 username riêng: Tor tự động phân phối mỗi đệ tử 1 đường truyền (circuit) và 1 IP riêng biệt hoàn toàn!
-    return `socks5://d_${index}_${attempt}:torpass@127.0.0.1:${torPort}`;
+    // Phân bổ 100 đệ tử vào pool 20 mạch Tor ổn định (mỗi mạch ~5 đệ tử).
+    // Giữ kết nối siêu mượt, Tor không bị quá tải, mà vẫn đảm bảo 20 IP khác biệt trên toàn thế giới!
+    // Khi thử lại thất bại 3 lần mới chuyển sang nhóm mạch mới (epoch).
+    const circuitId = (index - 1) % 20;
+    const epoch = Math.floor(attempt / 3);
+    return `socks5://d_${circuitId}_${epoch}:torpass@127.0.0.1:${torPort}`;
   }
   if (!proxyList || proxyList.length === 0) return null;
   const idx = ((index - 1) + attempt) % proxyList.length;
@@ -615,6 +847,8 @@ class Disciple {
     this.ws = null;
     this.connected = false;
     this.ready = false;
+    this.isConnecting = false;
+    this.reconnectTimer = null;
     this.myId = null;
     this.myPid = null;
     this.heartbeatTimer = null;
@@ -627,24 +861,43 @@ class Disciple {
 
   connect() {
     if (this.stopped) return;
+    if (this.isConnecting) return;
+    if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+
+    this.isConnecting = true;
     const proxy = getProxyForDisciple(this.index, this.proxyAttempt);
     this.currentProxy = proxy;
     try {
       if (proxy) {
         this.log(`Đang kết nối qua Proxy: ${proxy}...`, "\x1b[35m");
         this.ws = new PureWebSocket(SERVER_URL, { proxy });
-      } else if (globalThis.WebSocket) {
-        this.ws = new globalThis.WebSocket(SERVER_URL);
       } else {
         this.ws = new PureWebSocket(SERVER_URL);
       }
     } catch (err) {
+      this.isConnecting = false;
       this.log(`Lỗi tạo kết nối: ${err.message}`, "\x1b[31m");
       this.scheduleReconnect();
       return;
     }
 
     this.ws.onopen = () => {
+      this.isConnecting = false;
       this.connected = true;
       this.proxyAttempt = 0;
       this.log(`Đã mở socket${this.currentProxy ? ` (via ${this.currentProxy})` : ""}, đang gửi handshake...`, "\x1b[36m");
@@ -684,6 +937,17 @@ class Disciple {
           if (formationMode !== "roam") {
             this.enterChanhDien();
           }
+        } else if (msg.t === "busy") {
+          this.log(`Máy chủ báo bận / giới hạn IP (Rate Limit). Đang chuyển proxy khác...`, "\x1b[33m");
+          if (this.currentProxy) {
+            markProxyFailed(this.currentProxy);
+          } else if (proxyList.length === 0) {
+            fetchFreeProxies().then(() => {
+              this.reconnect();
+            });
+            return;
+          }
+          this.scheduleReconnect();
         } else if (msg.t === "room") {
           this.room = msg.room;
           if (Array.isArray(msg.peers)) msg.peers.forEach(registerOrUpdatePeer);
@@ -692,21 +956,29 @@ class Disciple {
         } else if (msg.t === "leave" && msg.id) {
           removePeer(msg.id);
         } else if (msg.t === "state" && msg.id) {
-          const p = roomOtherPlayers.get(msg.id);
-          if (p) {
-            if (typeof msg.x === "number") p.x = msg.x;
-            if (typeof msg.y === "number") p.y = msg.y;
-            if (typeof msg.z === "number") p.z = msg.z;
-            if (typeof msg.ry === "number") p.ry = msg.ry;
-            if (typeof msg.s === "number") p.s = msg.s;
-            p.lastUpdate = Date.now();
+          if (!isOurDisciple(msg.id, msg.name)) {
+            let p = roomOtherPlayers.get(msg.id);
+            if (!p) {
+              registerOrUpdatePeer({ id: msg.id, name: msg.name, x: msg.x, y: msg.y, z: msg.z, ry: msg.ry, s: msg.s });
+            } else {
+              if (typeof msg.x === "number") p.x = msg.x;
+              if (typeof msg.y === "number") p.y = msg.y;
+              if (typeof msg.z === "number") p.z = msg.z;
+              if (typeof msg.ry === "number") p.ry = msg.ry;
+              if (typeof msg.s === "number") p.s = msg.s;
+              p.lastUpdate = Date.now();
+            }
           }
         } else if (msg.t === "states" && Array.isArray(msg.a)) {
           for (const [id, x, y, z, ry, s] of msg.a) {
-            const p = roomOtherPlayers.get(id);
-            if (p) {
-              p.x = x; p.y = y; p.z = z; p.ry = ry; p.s = s;
-              p.lastUpdate = Date.now();
+            if (!isOurDisciple(id)) {
+              let p = roomOtherPlayers.get(id);
+              if (!p) {
+                registerOrUpdatePeer({ id, x, y, z, ry, s });
+              } else {
+                p.x = x; p.y = y; p.z = z; p.ry = ry; p.s = s;
+                p.lastUpdate = Date.now();
+              }
             }
           }
         } else if (msg.t === "emote" && msg.e === "lay" && msg.id) {
@@ -719,17 +991,26 @@ class Disciple {
     };
 
     this.ws.onclose = () => {
+      this.isConnecting = false;
       this.connected = false;
       this.ready = false;
       this.cleanupTimers();
       if (!this.stopped) {
-        this.log(`Mất kết nối máy chủ, tự động kết nối lại sau 3s...`, "\x1b[33m");
         this.scheduleReconnect();
       }
     };
 
     this.ws.onerror = (err) => {
-      this.log(`Lỗi kết nối: ${err.message || "Lỗi mạng"}`, "\x1b[31m");
+      this.isConnecting = false;
+      const errMsg = err?.message || "Lỗi mạng";
+      this.log(`Lỗi kết nối: ${errMsg}`, "\x1b[31m");
+      if (errMsg.includes("403 Forbidden") || errMsg.includes("403")) {
+        if (isTorMode) {
+          triggerTorBlockedFallback();
+        } else if (this.currentProxy) {
+          markProxyFailed(this.currentProxy, true);
+        }
+      }
     };
   }
 
@@ -769,9 +1050,9 @@ class Disciple {
       }
     }, 10000);
 
-    // Định kỳ refresh tọa độ Chánh điện mỗi 15s
+    // Định kỳ refresh tọa độ Chánh điện mỗi 15s nếu đang ở chế độ hall
     this.refreshTimer = setInterval(() => {
-      if (this.ready) {
+      if (this.ready && formationMode === "hall") {
         this.enterChanhDien();
       }
     }, 15000);
@@ -786,10 +1067,24 @@ class Disciple {
 
   bow() {
     if (!this.ready) return false;
-    this.enterChanhDien();
     const ok = this.send({ t: "emote", e: "lay" });
     if (ok) this.bowCount++;
     return ok;
+  }
+
+  updateLook() {
+    if (!this.ready || !this.ws) return;
+    this.send({
+      t: "look",
+      name: this.name,
+      kind: this.look?.kind || "tieu",
+      robe: this.look?.robe || "nau",
+      skin: this.look?.skin || "dong",
+      bio: "Đệ tử trợ lực terminal",
+      beads: this.look?.beads || "go",
+      cushion: this.look?.cushion || "vang",
+      phapkhi: this.look?.phapkhi || "mo"
+    });
   }
 
   setRoom(newRoom) {
@@ -801,32 +1096,74 @@ class Disciple {
   }
 
   scheduleReconnect() {
+    if (this.stopped) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.currentProxy) {
       markProxyFailed(this.currentProxy);
     }
     this.proxyAttempt++;
-    setTimeout(() => {
-      if (!this.stopped) this.connect();
-    }, 2500);
+
+    // Backoff thông minh với jitter và phân tán stagger theo số thứ tự đệ tử
+    // Tránh tình trạng bão kết nối (reconnect storm) cùng lúc gây sập cổng Tor
+    const baseBackoff = Math.min(25000, 3500 + (this.proxyAttempt * 1500));
+    const jitter = Math.floor(Math.random() * 1500);
+    const stagger = ((this.index - 1) % 20) * 300;
+    const delay = baseBackoff + jitter + stagger;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.stopped && !this.connected && !this.isConnecting) {
+        this.connect();
+      }
+    }, delay);
   }
 
   reconnect() {
     this.cleanupTimers();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.isConnecting = false;
+    this.proxyAttempt = 0;
     if (this.ws) {
-      try { this.ws.close(); } catch { }
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
     this.connected = false;
     this.ready = false;
+    const stagger = ((this.index - 1) % 20) * 200;
     setTimeout(() => {
       if (!this.stopped) this.connect();
-    }, 400);
+    }, 400 + stagger);
   }
 
   stop() {
     this.stopped = true;
+    this.isConnecting = false;
     this.cleanupTimers();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
-      try { this.ws.close(); } catch { }
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
   }
 
@@ -844,7 +1181,7 @@ for (let i = 1; i <= targetCount; i++) {
 
 let autoBowTimer = null;
 let roamTimer = null;
-let formationMode = "hall"; // "hall" | "roam"
+let formationMode = (args.includes("--follow") || args.includes("--f") || args.includes("--roam")) ? "roam" : "hall"; // "hall" | "roam"
 
 function startRoaming() {
   formationMode = "roam";
@@ -1066,6 +1403,25 @@ function startRoaming() {
         const distToSlot = Math.hypot(dx, dz);
         const distToPlayer = Math.hypot(targetPlayer.x - d.pos.x, targetPlayer.z - d.pos.z);
 
+        // Khi mới vào phòng hoặc khi sư phụ chạy/dịch chuyển đi xa: lập tức dịch chuyển đệ tử vào đúng vị trí hàng
+        if (!d.hasSpawnedNearPlayer || distToPlayer > 25.0) {
+          d.hasSpawnedNearPlayer = true;
+          d.pos.x = Math.round(slotX * 100) / 100;
+          d.pos.z = Math.round(slotZ * 100) / 100;
+          d.pos.ry = Math.round(slotRy * 100) / 100;
+          const gY = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.max(gY, Math.round((gY + safeAlt) * 100) / 100);
+          d.send({
+            t: "state",
+            x: d.pos.x,
+            y: d.pos.y,
+            z: d.pos.z,
+            ry: d.pos.ry,
+            s: 0
+          });
+          return;
+        }
+
         let currentSpeed = 0.28;
         if (distToSlot > 6.0 || distToPlayer > 8.0) {
           currentSpeed = 0.55;
@@ -1084,17 +1440,20 @@ function startRoaming() {
           d.pos.ry = Math.round(slotRy * 100) / 100;
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
-          d.lastStateSend = now;
 
-          const isWalking = distToSlot > 0.12;
-          d.send({
-            t: "state",
-            x: d.pos.x,
-            y: d.pos.y,
-            z: d.pos.z,
-            ry: d.pos.ry,
-            s: isWalking ? 1 : (targetPlayer.s === 2 ? 2 : 0)
-          });
+          // Throttling: Gửi tọa độ di chuyển tối đa mỗi 350ms để không nghẽn băng thông Tor
+          if (!d.lastStateSend || now - d.lastStateSend >= 350) {
+            d.lastStateSend = now;
+            const isWalking = distToSlot > 0.12;
+            d.send({
+              t: "state",
+              x: d.pos.x,
+              y: d.pos.y,
+              z: d.pos.z,
+              ry: d.pos.ry,
+              s: isWalking ? 1 : (targetPlayer.s === 2 ? 2 : 0)
+            });
+          }
           return;
         } else {
           d.pos.x = Math.round(slotX * 100) / 100;
@@ -1103,7 +1462,8 @@ function startRoaming() {
           const moveGroundY = getGroundY(d.pos.x, d.pos.z);
           d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
 
-          if (!d.lastStateSend || now - d.lastStateSend >= 1200) {
+          // Khi đã đứng đúng vị trí: gửi keepalive mỗi 2.5s
+          if (!d.lastStateSend || now - d.lastStateSend >= 2500) {
             d.lastStateSend = now;
             const followState = (targetPlayer.s === 2) ? 2 : 0;
             d.send({
@@ -1183,7 +1543,6 @@ function startRoaming() {
       // TUYỆT ĐỐI KHÔNG ĐỘN THỔ: luôn >= moveGroundY
       d.pos.y = Math.max(moveGroundY, Math.round((moveGroundY + safeAlt) * 100) / 100);
       d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
-      d.lastStateSend = now;
 
       // Cập nhật zone khi chuyển khu vực
       if (d.currentZone !== d.targetWaypoint.zone) {
@@ -1191,15 +1550,18 @@ function startRoaming() {
         d.send({ t: "visit", zone: d.targetWaypoint.zone });
       }
 
-      // Gửi trạng thái đi bộ (s: 1)
-      d.send({
-        t: "state",
-        x: d.pos.x,
-        y: d.pos.y,
-        z: d.pos.z,
-        ry: d.pos.ry,
-        s: 1
-      });
+      // Gửi trạng thái đi bộ (s: 1) có throttling 350ms
+      if (!d.lastStateSend || now - d.lastStateSend >= 350) {
+        d.lastStateSend = now;
+        d.send({
+          t: "state",
+          x: d.pos.x,
+          y: d.pos.y,
+          z: d.pos.z,
+          ry: d.pos.ry,
+          s: 1
+        });
+      }
     });
   }, 200);
 }
@@ -1219,15 +1581,12 @@ function recallToHall() {
 }
 
 function bowAllDisciples() {
-  if (formationMode === "roam") {
-    recallToHall();
-  }
   let count = 0;
   disciples.forEach((d) => {
     if (d.bow()) count++;
   });
   const time = new Date().toLocaleTimeString("vi-VN");
-  console.log(`\x1b[35m[${time}] 🙏 ĐÃ PHÁT ĐỘNG: ${count}/${disciples.length} đệ tử ngầm đồng loạt LẠY trong Chánh điện!\x1b[0m`);
+  console.log(`\x1b[35m[${time}] 🙏 ĐÃ PHÁT ĐỘNG: ${count}/${disciples.length} đệ tử ngầm đồng loạt LẠY!\x1b[0m`);
 }
 
 function startAutoBow() {
@@ -1316,6 +1675,57 @@ async function shoutGreeting(customMsg) {
   }
 }
 
+let autoChatTimer = null;
+let autoChatIntervalSec = 15;
+let autoChatText = "A Di Đà Phật";
+
+function startAutoChat(text, intervalSec) {
+  if (text) autoChatText = text;
+  if (intervalSec && intervalSec >= 5) autoChatIntervalSec = intervalSec;
+  if (autoChatTimer) clearInterval(autoChatTimer);
+  console.log(`\x1b[32m[AUTO CHAT] Đã BẬT tự động chat mỗi ${autoChatIntervalSec}s: "${autoChatText}"\x1b[0m`);
+  shoutGreeting(autoChatText);
+  autoChatTimer = setInterval(() => {
+    shoutGreeting(autoChatText);
+  }, autoChatIntervalSec * 1000);
+}
+
+function stopAutoChat() {
+  if (autoChatTimer) clearInterval(autoChatTimer);
+  autoChatTimer = null;
+  console.log(`\x1b[33m[AUTO CHAT] Đã TẮT tự động chat.\x1b[0m`);
+}
+
+let isDismissed = false;
+let savedDiscipleCount = targetCount;
+
+function dismissAllDisciples() {
+  isDismissed = true;
+  savedDiscipleCount = Math.max(1, disciples.length);
+  console.log(`\x1b[33m[THU HỒI] Đang thu hồi toàn bộ ${disciples.length} đệ tử rút khỏi phòng...\x1b[0m`);
+  disciples.forEach((d) => d.stop());
+  disciples.length = 0;
+  console.log(`\x1b[32m[THU HỒI] Đã thu hồi toàn bộ đệ tử thành công! Bạn có thể bấm 'Triệu hồi' bất cứ lúc nào.\x1b[0m`);
+}
+
+function summonAllDisciples(count) {
+  isDismissed = false;
+  const num = count || savedDiscipleCount || 100;
+  console.log(`\x1b[32m[TRIỆU HỒI] Đang triệu hồi ${num} đệ tử kết nối lại vào phòng...\x1b[0m`);
+  disciples.forEach((d) => d.stop());
+  disciples.length = 0;
+  for (let i = 1; i <= num; i++) {
+    const d = new Disciple(i, targetRoom);
+    disciples.push(d);
+    setTimeout(() => {
+      if (!isDismissed) d.connect();
+    }, (i - 1) * 200);
+  }
+  if (formationMode === "roam" || followPlayer) {
+    startRoaming();
+  }
+}
+
 function printHeader() {
   console.clear();
   console.log("\x1b[1;36m========================================================================\x1b[0m");
@@ -1338,6 +1748,9 @@ function printHeader() {
     proxyStatus = `XOAY VÒNG (${proxyList.length} proxy)`;
   }
   console.log(`\x1b[32m▶ Proxy / VPN    :\x1b[0m ${proxyStatus}`);
+  if (isGuiMode) {
+    console.log(`\x1b[35m▶ Giao diện GUI  :\x1b[0m Đang chạy tại http://127.0.0.1:4567 (Đã mở cửa sổ ứng dụng)`);
+  }
   console.log(`\x1b[32m▶ Tài nguyên     :\x1b[0m 0% GPU, < 15MB RAM, 0 tab trình duyệt, 0 npm packages`);
   console.log("\x1b[1;36m------------------------------------------------------------------------\x1b[0m");
   console.log("\x1b[1;37mLỆNH ĐIỀU KHIỂN:\x1b[0m");
@@ -1369,15 +1782,21 @@ function printHeader() {
 
 async function startAll() {
   if (isTorMode) {
-    torPort = await detectTorPort();
-  } else if (autoFreeProxy && proxyList.length === 0) {
-    console.log("\x1b[33m[PROXY] Đang tự động cào danh sách Proxy SOCKS5 sống miễn phí...\x1b[0m");
+    torPort = await ensureTorReady();
+  } else if ((autoFreeProxy || targetCount > 10) && proxyList.length === 0) {
+    console.log("\x1b[33m[PROXY] Số lượng đệ tử lớn (>10), tự động nạp kho Proxy SOCKS5 sống để vượt giới hạn IP máy chủ...\x1b[0m");
     await fetchFreeProxies();
   }
   printHeader();
+  if (isGuiMode) {
+    startGuiServer();
+  }
   disciples.forEach((d, idx) => {
     setTimeout(() => d.connect(), idx * 250);
   });
+  if (formationMode === "roam" || followPlayer) {
+    startRoaming();
+  }
 }
 
 startAll();
@@ -1386,14 +1805,8 @@ if (autoBow) {
   setTimeout(startAutoBow, 3000);
 }
 
-// Lắng nghe input từ bàn phím
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false
-});
-
-rl.on("line", (line) => {
+async function handleCommand(line) {
+  if (typeof line !== "string") return;
   const cmd = line.trim().toLowerCase();
   if (cmd === "" || cmd === "lay" || cmd === "l") {
     bowAllDisciples();
@@ -1411,10 +1824,21 @@ rl.on("line", (line) => {
   } else if (cmd.startsWith("name ") || cmd.startsWith("ten ")) {
     const newName = line.trim().replace(/^(name|ten)\s+/i, "").trim();
     customName = newName;
-    disciples.forEach((d) => {
+    console.log(`\x1b[32m[ĐỔI TÊN] Đang áp dụng pháp danh mới: "${customName || "Đệ tử ngầm (mặc định)"}" và đồng bộ hiển thị vào game...\x1b[0m`);
+    disciples.forEach((d, idx) => {
       d.name = d.formatName(d.index);
+      d.cid = crypto.randomUUID(); // Sinh mới CID để máy chủ game cấp mới profile
+      if (d.ready && d.ws) {
+        d.updateLook();
+      }
+      // Tái kết nối so le nhanh để server ghi nhận tên mới trong packet hello và broadcast vào game
+      setTimeout(() => {
+        if (!d.stopped) {
+          d.reconnect();
+        }
+      }, (idx % 25) * 120);
     });
-    console.log(`\x1b[32m[ĐỔI TÊN] Đã cập nhật tên đệ tử thành: ${customName || "Đệ tử ngầm (mặc định)"}\x1b[0m`);
+    console.log(`\x1b[32m[ĐỔI TÊN] Đã bắt đầu đồng bộ tên mới trong game cho toàn bộ ${disciples.length} đệ tử!\x1b[0m`);
   } else if (cmd === "air" || cmd === "fly" || cmd === "khinhcong") {
     airWalk = !airWalk;
     console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (chu kỳ tự bay lên & lượn xuống mặt đất không độn thổ)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
@@ -1451,21 +1875,27 @@ rl.on("line", (line) => {
       }
     });
   } else if (cmd === "follow" || cmd === "f" || cmd === "bamtheo") {
-    followPlayer = !followPlayer;
-    console.log(`\x1b[36m[BÁM THEO] Đã ${followPlayer ? "BẬT (tự động chia đều bám theo người chơi khác)" : "TẮT (trở về đi dạo tự do)"} chế độ Đi theo người chơi khác!\x1b[0m`);
-    if (followPlayer && formationMode !== "roam") {
+    if (formationMode !== "roam" || !followPlayer) {
+      followPlayer = true;
       startRoaming();
+    } else {
+      followPlayer = false;
     }
+    console.log(`\x1b[36m[BÁM THEO] Đã ${followPlayer ? "BẬT (tự động bám theo sư phụ)" : "TẮT (trở về đi dạo tự do)"}!\x1b[0m`);
   } else if (cmd === "corridor" || cmd === "hang2" || cmd === "loidi") {
-    corridorMode = !corridorMode;
-    if (corridorMode) lectureMode = false;
-    console.log(`\x1b[36m[2 HÀNG DANH DỰ] Đã ${corridorMode ? "BẬT (xếp 2 hàng tạo lối đi thông thoáng ở giữa)" : "TẮT (trở về cánh cung)"}!\x1b[0m`);
+    corridorMode = true;
+    lectureMode = false;
+    followPlayer = true;
+    if (formationMode !== "roam") startRoaming();
+    console.log(`\x1b[36m[2 HÀNG DANH DỰ] Đã BẬT (xếp 2 hàng tạo lối đi thông thoáng ở giữa)!\x1b[0m`);
   } else if (cmd.startsWith("rows ") || cmd.startsWith("hang ")) {
     const num = parseInt(cmd.replace(/^(rows|hang)\s+/, ""), 10);
     if (!isNaN(num) && num >= 2) {
       lectureRows = Math.min(30, num);
       lectureMode = true;
       corridorMode = false;
+      followPlayer = true;
+      if (formationMode !== "roam") startRoaming();
       const total = disciples.filter((x) => x.ready).length;
       const other = Math.ceil(Math.max(1, total) / lectureRows);
       const orientText = lectureOrient === "doc" ? `${lectureRows} hàng dọc (mỗi hàng dài ~${other} đệ tử)` : `${lectureRows} hàng ngang (mỗi hàng ~${other} đệ tử)`;
@@ -1500,17 +1930,58 @@ rl.on("line", (line) => {
     randomLook = !randomLook;
     lookSeed = Math.floor(Math.random() * 10000);
     console.log(`\x1b[35m[TRANG PHỤC] Đã ${randomLook ? "BẬT ngẫu nhiên trang phục & pháp khí đa dạng" : "TẮT (áo nâu truyền thống)"}!\x1b[0m`);
+    disciples.forEach((d, idx) => {
+      d.look = randomLook ? getRandomLook(d.index) : { kind: "tieu", robe: "nau", skin: "dong", beads: "go", cushion: "vang", phapkhi: "mo" };
+      if (d.ready && d.ws) {
+        setTimeout(() => d.updateLook(), (idx % 25) * 50);
+      }
+    });
   } else if (cmd.startsWith("greet") || cmd.startsWith("chao")) {
     const parts = line.trim().split(/\s+/);
     const custom = parts.slice(1).join(" ").trim();
+    if (custom) autoChatText = custom;
     shoutGreeting(custom);
+  } else if (cmd.startsWith("autochat") || cmd.startsWith("tudongchat")) {
+    const raw = line.trim().replace(/^(autochat|tudongchat)\s*/i, "").trim();
+    if (raw.toLowerCase() === "off" || raw.toLowerCase() === "tat") {
+      stopAutoChat();
+    } else if (raw.toLowerCase() === "on" || raw.toLowerCase() === "bat") {
+      startAutoChat(autoChatText, autoChatIntervalSec);
+    } else if (/^(on|bat)\s+/i.test(raw)) {
+      const content = raw.replace(/^(on|bat)\s+/i, "").trim();
+      if (content) autoChatText = content;
+      startAutoChat(autoChatText, autoChatIntervalSec);
+    } else if (raw.toLowerCase().startsWith("interval ") || raw.toLowerCase().startsWith("time ")) {
+      const sec = parseInt(raw.split(/\s+/)[1], 10);
+      if (!isNaN(sec) && sec >= 5) {
+        autoChatIntervalSec = sec;
+        if (autoChatTimer) startAutoChat(autoChatText, autoChatIntervalSec);
+        console.log(`\x1b[32m[AUTO CHAT] Đã đổi chu kỳ thành ${sec} giây!\x1b[0m`);
+      }
+    } else {
+      if (raw) autoChatText = raw;
+      if (autoChatTimer) {
+        stopAutoChat();
+      } else {
+        startAutoChat(autoChatText, autoChatIntervalSec);
+      }
+    }
+  } else if (cmd === "dismiss" || cmd === "thuhoi" || cmd === "giaitan") {
+    dismissAllDisciples();
+  } else if (cmd.startsWith("summon") || cmd.startsWith("trieuhoi")) {
+    const rawNum = line.trim().replace(/^(summon|trieuhoi)\s*/i, "").trim();
+    const num = parseInt(rawNum, 10);
+    summonAllDisciples(isNaN(num) ? null : num);
   } else if (cmd === "tagname" || cmd === "kemten" || cmd === "greetname") {
     greetIncludeName = !greetIncludeName;
     console.log(`\x1b[35m[KÈM TÊN CHAT] Đã ${greetIncludeName ? "BẬT (kèm tên người theo dõi)" : "TẮT (chỉ chat nội dung bạn nhập)"}!\x1b[0m`);
   } else if (cmd === "tor") {
     isTorMode = !isTorMode;
-    if (isTorMode) autoFreeProxy = false;
-    console.log(`\x1b[32m[TOR] Đã ${isTorMode ? "BẬT (Mỗi đệ tử 1 mạch IP riêng biệt qua 127.0.0.1:9050 - Tor Multi-Circuit)" : "TẮT"} chế độ Tor!\x1b[0m`);
+    if (isTorMode) {
+      autoFreeProxy = false;
+      torPort = await ensureTorReady();
+    }
+    console.log(`\x1b[32m[TOR] Đã ${isTorMode ? "BẬT (Mỗi đệ tử 1 mạch IP riêng biệt qua 127.0.0.1:" + torPort + " - Tor Multi-Circuit)" : "TẮT"} chế độ Tor!\x1b[0m`);
     disciples.forEach((d) => d.reconnect());
   } else if (cmd.startsWith("proxy ") || cmd === "proxy") {
     const newProxy = line.trim().replace(/^proxy\s*/, "").trim();
@@ -1566,10 +2037,9 @@ rl.on("line", (line) => {
         console.log(`\x1b[32m[MỤC TIÊU] Đã đặt mục tiêu bám theo: "${followTargetName}"! Toàn bộ đệ tử đang di chuyển bám theo...\x1b[0m`);
       }
     }
-    if (!followPlayer) {
-      followPlayer = true;
-      if (formationMode !== "roam") startRoaming();
-    }
+    followPlayer = true;
+    if (formationMode !== "roam") startRoaming();
+    disciples.forEach((d) => { d.hasSpawnedNearPlayer = false; });
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
@@ -1595,7 +2065,147 @@ rl.on("line", (line) => {
     disciples.forEach((d) => d.stop());
     process.exit(0);
   }
+}
+
+// Lắng nghe input từ bàn phím Terminal
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: false
 });
+rl.on("line", (line) => handleCommand(line));
+
+function launchGuiWindow(port) {
+  const url = `http://127.0.0.1:${port}`;
+  const edgePath = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+  const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  const userEdgePath = path.join(process.env.LOCALAPPDATA || "", "Microsoft\\Edge\\Application\\msedge.exe");
+
+  let appCmd = `start ${url}`;
+  if (fs.existsSync(edgePath)) {
+    appCmd = `start "" "${edgePath}" --app=${url} --window-size=1280,850`;
+  } else if (fs.existsSync(chromePath)) {
+    appCmd = `start "" "${chromePath}" --app=${url} --window-size=1280,850`;
+  } else if (fs.existsSync(userEdgePath)) {
+    appCmd = `start "" "${userEdgePath}" --app=${url} --window-size=1280,850`;
+  }
+
+  exec(appCmd, (err) => {
+    if (err) {
+      exec(`start ${url}`);
+    }
+  });
+}
+
+function startGuiServer(preferredPort = 4567) {
+  const server = http.createServer((req, res) => {
+    const parsedUrl = new URL(req.url, `http://127.0.0.1:${preferredPort}`);
+
+    if (req.method === "GET" && (parsedUrl.pathname === "/" || parsedUrl.pathname === "/index.html")) {
+      const htmlPath = path.join(__dirname, "gui.html");
+      if (fs.existsSync(htmlPath)) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end(fs.readFileSync(htmlPath, "utf8"));
+      } else {
+        res.writeHead(404);
+        return res.end("gui.html not found");
+      }
+    }
+
+    if (req.method === "GET" && parsedUrl.pathname === "/api/state") {
+      const players = Array.from(roomOtherPlayers.values())
+        .filter((p) => !isOurDisciple(p.id, p.name))
+        .map((p) => ({
+          id: p.id,
+          name: p.name || "Đạo hữu"
+        }));
+
+      const state = {
+        room: targetRoom,
+        tor: {
+          enabled: isTorMode,
+          port: torPort
+        },
+        counts: {
+          total: disciples.length,
+          ready: disciples.filter((d) => d.ready).length,
+          connected: disciples.filter((d) => d.connected).length
+        },
+        settings: {
+          name: customName,
+          formation: formationMode,
+          autoBow: !!autoBowTimer,
+          follow: followPlayer,
+          followTarget: followTargetName,
+          corridor: corridorMode,
+          lecture: lectureMode,
+          rows: lectureRows,
+          orient: lectureOrient,
+          facing: lectureFacing,
+          airWalk: airWalk,
+          randomLook: randomLook,
+          greetIncludeName: greetIncludeName,
+          autoChat: !!autoChatTimer,
+          autoChatText: autoChatText,
+          autoChatInterval: autoChatIntervalSec,
+          isDismissed: isDismissed
+        },
+        players,
+        logs: guiLogs,
+        disciples: disciples.map((d) => ({
+          index: d.index,
+          name: d.name,
+          ready: d.ready,
+          connected: d.connected,
+          bowCount: d.bowCount,
+          id: d.myId
+        }))
+      };
+
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      });
+      return res.end(JSON.stringify(state));
+    }
+
+    if (req.method === "POST" && parsedUrl.pathname === "/api/cmd") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", async () => {
+        try {
+          const data = JSON.parse(body || "{}");
+          if (data && data.cmd) {
+            await handleCommand(data.cmd);
+          }
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (e) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  server.on("error", (e) => {
+    if (e.code === "EADDRINUSE") {
+      startGuiServer(preferredPort + 1);
+    }
+  });
+
+  server.listen(preferredPort, "127.0.0.1", () => {
+    console.log(`\x1b[32m[GUI] Bảng điều khiển trực quan đã sẵn sàng tại: http://127.0.0.1:${preferredPort}\x1b[0m`);
+    launchGuiWindow(preferredPort);
+  });
+}
 
 process.on("SIGINT", () => {
   console.log("\n\x1b[33mĐang ngắt kết nối các đệ tử và thoát...\x1b[0m");

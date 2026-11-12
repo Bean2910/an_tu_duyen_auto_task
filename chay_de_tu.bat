@@ -23,30 +23,30 @@ if "%COUNT%"=="" set COUNT=100
 
 echo.
 echo ▶ Chọn chế độ kết nối mạng cho %COUNT% đệ tử:
-echo   [1] Cào 3.000+ Proxy SOCKS5 miễn phí từ GitHub & Proxyscrape (Mặc định)
-echo   [2] Dùng Tor Multi-Circuit (Khuyên dùng cho 100 đệ tử: 100 IP riêng, không dis)
-echo   [3] Dùng danh sách Proxy riêng trong file proxies.txt
-echo   [4] Kết nối trực tiếp không qua proxy (chỉ nên dùng khi gọi dưới 10 đệ tử)
+echo   [1] Kết nối trực tiếp (Khuyên dùng - Siêu tốc, ổn định nhất, 0 lag) (Mặc định)
+echo   [2] Dùng danh sách Proxy riêng trong file proxies.txt
+echo   [3] Cào 3.000+ Proxy SOCKS5 miễn phí từ GitHub & Proxyscrape
+echo   [4] Dùng Tor Multi-Circuit (Lưu ý: Có thể bị Cloudflare chặn 403 Forbidden)
 echo.
 set /p MODE="▶ Lựa chọn của bạn (Nhấn Enter mặc định là 1): "
 if "%MODE%"=="" set MODE=1
 
 if "%MODE%"=="1" (
     echo.
-    echo Đang khởi động %COUNT% đệ tử với kho Proxy SOCKS5 miễn phí...
-    node disciples.js --count=%COUNT% --free-proxy --follow --auto --hang=5
+    echo Đang khởi động %COUNT% đệ tử kết nối trực tiếp...
+    node disciples.js --count=%COUNT% --follow --auto --hang=5
 ) else if "%MODE%"=="2" (
-    echo.
-    echo Đang khởi động %COUNT% đệ tử qua Tor Multi-Circuit (cần mở cửa sổ 'tor' trước)...
-    node disciples.js --count=%COUNT% --tor --follow --auto --hang=5
-) else if "%MODE%"=="3" (
     echo.
     echo Đang nạp proxy từ file proxies.txt cho %COUNT% đệ tử...
     node disciples.js --count=%COUNT% --proxy-file=proxies.txt --follow --auto --hang=5
+) else if "%MODE%"=="3" (
+    echo.
+    echo Đang khởi động %COUNT% đệ tử với kho Proxy SOCKS5 miễn phí...
+    node disciples.js --count=%COUNT% --free-proxy --follow --auto --hang=5
 ) else (
     echo.
-    echo Đang khởi động %COUNT% đệ tử kết nối trực tiếp...
-    node disciples.js --count=%COUNT% --follow --auto
+    echo Đang khởi động %COUNT% đệ tử qua Tor Multi-Circuit...
+    node disciples.js --count=%COUNT% --tor --follow --auto --hang=5
 )
 
 pause

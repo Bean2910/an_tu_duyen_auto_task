@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>An Tự Duyên - Bảng Điều Khiển Đệ Tử Ngầm</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 46, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #f59e0b;
+      --primary-hover: #d97706;
+      --primary-glow: rgba(245, 158, 11, 0.35);
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.3);
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 10% 20%, rgba(245, 158, 11, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 40%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Top Header */
+    header {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      font-size: 26px;
+      filter: drop-shadow(0 0 10px var(--primary-glow));
+    }
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #fff;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    .header-badges {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+    }
+    .badge-tor.active {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+    .badge-tor.inactive {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+    }
+    .badge-room {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+      cursor: pointer;
+    }
+
+    /* Main Container */
+    .container {
+      display: grid;
+      grid-template-columns: 340px 1fr 340px;
+      gap: 18px;
+      padding: 18px 24px;
+      flex: 1;
+      max-width: 1600px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    @media (max-width: 1200px) {
+      .container { grid-template-columns: 320px 1fr; }
+      .col-right { grid-column: span 2; }
+    }
+    @media (max-width: 860px) {
+      .container { grid-template-columns: 1fr; }
+      .col-right { grid-column: span 1; }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(10px);
+      margin-bottom: 18px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Big Action Button */
+    .btn-bow {
+      width: 100%;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 18px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 8px 25px var(--primary-glow);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .btn-bow:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px rgba(245, 158, 11, 0.5);
+    }
+    .btn-bow:active {
+      transform: translateY(1px);
+    }
+    .btn-bow-hint {
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.85;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Quick Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+    .btn-action {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 8px;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      text-align: center;
+    }
+    .btn-action span.icon { font-size: 18px; }
+    .btn-action:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .btn-action.active {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: #10b981;
+      color: #34d399;
+      box-shadow: 0 0 15px var(--accent-glow);
+    }
+    .btn-action.active-amber {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: #f59e0b;
+      color: #fbbf24;
+      box-shadow: 0 0 15px var(--primary-glow);
+    }
+
+    /* Formation Radio/Buttons */
+    .form-group {
+      margin-top: 12px;
+    }
+    .form-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: block;
+      font-weight: 600;
+    }
+    .pill-group {
+      display: flex;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 4px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+    }
+    .pill-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 6px 4px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .pill-btn.active {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    /* Counter Bar */
+    .stat-bar {
+      display: flex;
+      justify-content: space-around;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 6px;
+      margin-bottom: 16px;
+    }
+    .stat-item {
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .stat-num.green { color: #34d399; }
+    .stat-num.amber { color: #fbbf24; }
+    .stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Radar Players */
+    .player-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .player-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s;
+    }
+    .player-item.targetted {
+      border-color: #34d399;
+      background: rgba(16, 185, 129, 0.1);
+    }
+    .player-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+    }
+    .player-name {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 140px;
+    }
+    .player-id {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .btn-target {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-target:hover {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-target.active {
+      background: #10b981;
+      border-color: #10b981;
+      color: #fff;
+    }
+
+    /* Disciples Grid */
+    .disciples-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 8px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .disciple-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      position: relative;
+    }
+    .disciple-card.ready {
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+    .disciple-card.connecting {
+      border-color: rgba(245, 158, 11, 0.35);
+    }
+    .disciple-card.offline {
+      border-color: rgba(239, 68, 68, 0.35);
+      opacity: 0.6;
+    }
+    .disciple-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+    }
+    .disciple-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+    .disciple-dot.ready { background: #34d399; box-shadow: 0 0 6px #34d399; }
+    .disciple-dot.connecting { background: #fbbf24; }
+    .disciple-dot.offline { background: #f87171; }
+    .disciple-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Inputs */
+    .input-box {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input-box:focus {
+      border-color: var(--primary);
+    }
+    .input-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .btn-small {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-small:hover {
+      background: var(--primary);
+    }
+
+    /* Terminal Console */
+    .console-box {
+      background: #050811;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: Consolas, monospace;
+      font-size: 11px;
+      height: 180px;
+      overflow-y: auto;
+      color: #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .console-line {
+      word-break: break-all;
+      line-height: 1.4;
+    }
+    .console-line.tor { color: #38bdf8; }
+    .console-line.bow { color: #f472b6; }
+    .console-line.err { color: #f87171; }
+    .console-line.succ { color: #4ade80; }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand">
+      <span class="brand-icon">🏮</span>
+      <div>
+        <div class="brand-title">AN TỰ DUYÊN · QUÂN ĐOÀN ĐỆ TỬ</div>
+        <div class="brand-sub">Headless Disciples Controller</div>
+      </div>
+    </div>
+    <div class="header-badges">
+      <div id="badge-dismiss" class="badge" style="cursor:pointer; background:rgba(239, 68, 68, 0.15); border-color:rgba(239, 68, 68, 0.4); color:#f87171;" onclick="toggleDismiss()">
+        🚪 <span id="txt-dismiss">Thu hồi đệ tử</span>
+      </div>
+      <div id="badge-room" class="badge badge-room" onclick="promptChangeRoom()">
+        📍 Phòng: <strong id="val-room">chua-1</strong>
+      </div>
+      <div id="badge-tor" class="badge badge-tor inactive" onclick="toggleTor()">
+        🌐 Mạng: <strong id="val-tor">Đang kiểm tra...</strong>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="container">
+
+    <!-- CỘT 1: HÀNH ĐỘNG & ĐỘI HÌNH -->
+    <div class="col-left">
+      <div class="card">
+        <button id="btn-bow-main" class="btn-bow" onclick="triggerAction('lay')">
+          <span>🙏 LẠY PHẬT ĐỒNG LOẠT</span>
+          <span class="btn-bow-hint">(Phím Space hoặc Click)</span>
+        </button>
+
+        <div class="grid-2">
+          <button id="btn-auto-bow" class="btn-action active-amber" onclick="triggerAction('auto')">
+            <span class="icon">🔄</span>
+            <span>Tự động lạy (7.5s)</span>
+          </button>
+          <button id="btn-follow" class="btn-action active" onclick="triggerAction('follow')">
+            <span class="icon">🚶</span>
+            <span>Bám theo sư phụ</span>
+          </button>
+        </div>
+
+        <div class="grid-2">
+          <button id="btn-hall" class="btn-action" onclick="triggerAction('hall')">
+            <span class="icon">🏛️</span>
+            <span>Về Chánh điện</span>
+          </button>
+          <button id="btn-roam" class="btn-action" onclick="triggerAction('roam')">
+            <span class="icon">🌳</span>
+            <span>Đi dạo quanh chùa</span>
+          </button>
+        </div>
+
+        <div class="grid-2">
+          <button id="btn-air" class="btn-action" onclick="triggerAction('air')">
+            <span class="icon">☁️</span>
+            <span>Khinh công (Bay lượn)</span>
+          </button>
+          <button id="btn-look" class="btn-action active" onclick="triggerAction('look')">
+            <span class="icon">🎨</span>
+            <span>Đổi ngẫu nhiên áo</span>
+          </button>
+        </div>
+
+        <div style="margin-top:12px;">
+          <button id="btn-dismiss-main" class="btn-action" style="width:100%; padding:10px; border-color:rgba(239,68,68,0.4); background:rgba(239,68,68,0.12); color:#fca5a5;" onclick="toggleDismiss()">
+            <span id="btn-dismiss-text">🚪 THU HỒI ĐỆ TỬ (GIẢI TÁN KHỎI PHÒNG)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ĐỘI HÌNH -->
+      <div class="card">
+        <div class="card-title">
+          <span>📐 Đội hình nghe pháp</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Kiểu xếp hàng</label>
+          <div class="pill-group">
+            <button id="pill-corridor" class="pill-btn" onclick="triggerAction('corridor')">2 Hàng lối đi</button>
+            <button id="pill-rows-3" class="pill-btn" onclick="triggerAction('rows 3')">3 Hàng</button>
+            <button id="pill-rows-5" class="pill-btn active" onclick="triggerAction('rows 5')">5 Hàng</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Chiều hàng & Hướng ngồi</label>
+          <div class="pill-group">
+            <button id="pill-ngang" class="pill-btn active" onclick="triggerAction('ngang')">Hàng ngang</button>
+            <button id="pill-doc" class="pill-btn" onclick="triggerAction('doc')">Hàng dọc</button>
+            <button id="pill-front" class="pill-btn active" onclick="triggerAction('front')">Trước mặt</button>
+            <button id="pill-behind" class="pill-btn" onclick="triggerAction('behind')">Sau lưng</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ĐỒNG THANH CHÀO HỎI & AUTO CHAT -->
+      <div class="card">
+        <div class="card-title">
+          <span>💬 Đồng thanh & Auto Chat</span>
+          <span id="badge-autochat" style="font-size:10px; color:#f59e0b; font-weight:700;"></span>
+        </div>
+        <input id="input-greet" class="input-box" type="text" placeholder="Nhập câu chào (VD: A Di Đà Phật...)" value="A Di Đà Phật" onkeydown="if(event.key==='Enter')sendGreeting()">
+        <div class="input-row">
+          <button class="btn-small" style="flex:1;" onclick="sendGreeting()">🗣️ Nói 1 lần</button>
+          <button id="btn-autochat" class="btn-small" style="background:rgba(245,158,11,0.15); border-color:rgba(245,158,11,0.4); color:#fbbf24;" onclick="toggleAutoChat()">🔄 Auto Chat: TẮT</button>
+          <button id="btn-tagname" class="btn-small" onclick="triggerAction('tagname')">Kèm tên: BẬT</button>
+        </div>
+        <div class="form-group" style="margin-top:10px;">
+          <label class="form-label">Chu kỳ tự động chat</label>
+          <div class="pill-group">
+            <button id="pill-chat-10" class="pill-btn" onclick="setAutoChatInterval(10)">10s</button>
+            <button id="pill-chat-15" class="pill-btn active" onclick="setAutoChatInterval(15)">15s</button>
+            <button id="pill-chat-30" class="pill-btn" onclick="setAutoChatInterval(30)">30s</button>
+            <button id="pill-chat-60" class="pill-btn" onclick="setAutoChatInterval(60)">60s</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CỘT 2: RADAR & BẦY ĐỆ TỬ -->
+    <div class="col-mid">
+      <!-- Thống kê đệ tử -->
+      <div class="stat-bar">
+        <div class="stat-item">
+          <div id="stat-total" class="stat-num">100</div>
+          <div class="stat-label">Tổng đệ tử</div>
+        </div>
+        <div class="stat-item">
+          <div id="stat-ready" class="stat-num green">0</div>
+          <div class="stat-label">Đã vào điện</div>
+        </div>
+        <div class="stat-item">
+          <div id="stat-bows" class="stat-num amber">0</div>
+          <div class="stat-label">Lần đã lạy</div>
+        </div>
+      </div>
+
+      <!-- Radar Đạo hữu trong phòng -->
+      <div class="card">
+        <div class="card-title">
+          <span>🎯 Radar đạo hữu trong chùa</span>
+          <button class="btn-small" style="padding:2px 8px; font-size:10px;" onclick="triggerAction('target auto')">↺ Bám theo tôi</button>
+        </div>
+        <div id="player-list" class="player-list">
+          <div style="font-size:11px; color:var(--text-muted); padding:8px; text-align:center;">Đang quét tìm người chơi trong phòng...</div>
+        </div>
+      </div>
+
+      <!-- Lưới đệ tử -->
+      <div class="card">
+        <div class="card-title">
+          <span>👥 Danh sách đệ tử (<span id="disciples-count-text">0</span>)</span>
+        </div>
+        <div id="disciples-grid" class="disciples-grid">
+          <!-- Render dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- CỘT 3: CÀI ĐẶT & TERMINAL LOGS -->
+    <div class="col-right">
+      <!-- Cài đặt số lượng & tên -->
+      <div class="card">
+        <div class="card-title">⚙️ Cài đặt quân đoàn</div>
+        
+        <label class="form-label">Số lượng đệ tử (<strong id="lbl-count">100</strong>)</label>
+        <div class="input-row">
+          <input id="range-count" type="range" min="1" max="200" value="100" style="flex:1;" oninput="document.getElementById('lbl-count').innerText = this.value">
+          <button class="btn-small" onclick="triggerAction('count ' + document.getElementById('range-count').value)">Áp dụng</button>
+        </div>
+
+        <label class="form-label" style="margin-top:12px;">Đổi pháp danh đệ tử</label>
+        <div class="input-row">
+          <input id="input-name" class="input-box" type="text" placeholder="VD: Thích Tuệ Minh #" onkeydown="if(event.key==='Enter')changeDisciplesName()">
+          <button id="btn-rename" class="btn-small" onclick="changeDisciplesName()">Đổi tên</button>
+        </div>
+      </div>
+
+      <!-- Proxy & Mạng -->
+      <div class="card">
+        <div class="card-title">🌐 Mạng & Proxy</div>
+        <div class="grid-2">
+          <button id="btn-toggle-tor" class="btn-action active" onclick="toggleTor()">
+            <span class="icon">🧅</span>
+            <span id="txt-tor-action">Tor: BẬT</span>
+          </button>
+          <button class="btn-action" onclick="triggerAction('freeproxy')">
+            <span class="icon">⚡</span>
+            <span>Cào Proxy free</span>
+          </button>
+        </div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:8px; line-height:1.4;">
+          💡 <em>Lưu ý: Mạng máy chủ Cloudflare có thể chặn IP Tor (403 Forbidden). Chế độ <b>Trực tiếp</b> hỗ trợ 100 đệ tử mượt mà nhất.</em>
+        </div>
+      </div>
+
+      <!-- Realtime Logs Console -->
+      <div class="card" style="margin-bottom:0;">
+        <div class="card-title">
+          <span>📜 Nhật ký thời gian thực</span>
+          <button class="btn-small" style="padding:2px 8px; font-size:10px;" onclick="clearLogs()">Xóa</button>
+        </div>
+        <div id="console-box" class="console-box">
+          <div class="console-line">[HỆ THỐNG] Đang tải giao diện điều khiển...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let localLogs = [];
+    let isAutoBow = false;
+    let isFollow = true;
+    let isTor = true;
+    let isDismissed = false;
+    let isAutoChat = false;
+    let targetPlayerName = "";
+
+    async function fetchState() {
+      try {
+        const res = await fetch("/api/state");
+        if (!res.ok) return;
+        const data = await res.json();
+        renderState(data);
+      } catch (err) {
+        // server might be busy
+      }
+    }
+
+    function renderState(s) {
+      if (!s) return;
+      // Header
+      document.getElementById("val-room").innerText = s.room || "chua-1";
+      isTor = !!s.tor?.enabled;
+      const torBadge = document.getElementById("badge-tor");
+      const torVal = document.getElementById("val-tor");
+      if (isTor) {
+        torBadge.className = "badge badge-tor active";
+        torVal.innerText = "Tor: BẬT (Port " + (s.tor?.port || 9050) + ")";
+        document.getElementById("txt-tor-action").innerText = "Tor: BẬT";
+        document.getElementById("btn-toggle-tor").className = "btn-action active";
+      } else {
+        torBadge.className = "badge badge-tor inactive";
+        torVal.innerText = "Trực tiếp (0 lag, 100 đệ tử)";
+        document.getElementById("txt-tor-action").innerText = "Tor: TẮT";
+        document.getElementById("btn-toggle-tor").className = "btn-action";
+      }
+
+      // Dismiss state
+      isDismissed = !!s.settings?.isDismissed;
+      const dismissTxt = document.getElementById("txt-dismiss");
+      const dismissBtnText = document.getElementById("btn-dismiss-text");
+      const dismissBtn = document.getElementById("btn-dismiss-main");
+      if (isDismissed) {
+        dismissTxt.innerText = "Triệu hồi đệ tử (" + (s.counts?.total || 100) + ")";
+        if (dismissBtn) {
+          dismissBtn.style.background = "rgba(16, 185, 129, 0.15)";
+          dismissBtn.style.borderColor = "rgba(16, 185, 129, 0.5)";
+          dismissBtn.style.color = "#34d399";
+          dismissBtnText.innerText = "✨ TRIỆU HỒI QUÂN ĐOÀN ĐỆ TỬ (" + (s.counts?.total || 100) + " ĐỆ TỬ)";
+        }
+      } else {
+        dismissTxt.innerText = "Thu hồi đệ tử";
+        if (dismissBtn) {
+          dismissBtn.style.background = "rgba(239, 68, 68, 0.12)";
+          dismissBtn.style.borderColor = "rgba(239, 68, 68, 0.4)";
+          dismissBtn.style.color = "#fca5a5";
+          dismissBtnText.innerText = "🚪 THU HỒI ĐỆ TỬ (GIẢI TÁN KHỎI PHÒNG)";
+        }
+      }
+
+      // Stats
+      document.getElementById("stat-total").innerText = s.counts?.total || 0;
+      document.getElementById("stat-ready").innerText = s.counts?.ready || 0;
+      document.getElementById("disciples-count-text").innerText = (s.counts?.ready || 0) + "/" + (s.counts?.total || 0);
+
+      let totalBows = 0;
+      if (s.disciples) {
+        s.disciples.forEach(d => totalBows += (d.bowCount || 0));
+      }
+      document.getElementById("stat-bows").innerText = totalBows;
+
+      // Settings toggles
+      isAutoBow = !!s.settings?.autoBow;
+      document.getElementById("btn-auto-bow").className = "btn-action " + (isAutoBow ? "active-amber" : "");
+
+      const isFollowing = s.settings?.formation === "roam" && !!s.settings?.follow;
+      document.getElementById("btn-follow").className = "btn-action " + (isFollowing ? "active" : "");
+
+      const isHall = s.settings?.formation === "hall";
+      document.getElementById("btn-hall").className = "btn-action " + (isHall ? "active-amber" : "");
+
+      const isRoaming = s.settings?.formation === "roam" && !s.settings?.follow;
+      document.getElementById("btn-roam").className = "btn-action " + (isRoaming ? "active" : "");
+
+      document.getElementById("btn-air").className = "btn-action " + (s.settings?.airWalk ? "active" : "");
+      document.getElementById("btn-look").className = "btn-action " + (s.settings?.randomLook ? "active" : "");
+      document.getElementById("btn-tagname").innerText = "Kèm tên: " + (s.settings?.greetIncludeName ? "BẬT" : "TẮT");
+
+      // Auto chat state
+      isAutoChat = !!s.settings?.autoChat;
+      const btnAutoChat = document.getElementById("btn-autochat");
+      const badgeAutoChat = document.getElementById("badge-autochat");
+      const curChatInterval = s.settings?.autoChatInterval || 15;
+      if (isAutoChat) {
+        btnAutoChat.innerText = "🔄 Auto Chat: BẬT (" + curChatInterval + "s)";
+        btnAutoChat.style.background = "rgba(245, 158, 11, 0.35)";
+        btnAutoChat.style.boxShadow = "0 0 12px rgba(245, 158, 11, 0.4)";
+        badgeAutoChat.innerText = "ĐANG TỰ ĐỘNG CHAT (" + curChatInterval + "S/LẦN)";
+      } else {
+        btnAutoChat.innerText = "🔄 Auto Chat: TẮT";
+        btnAutoChat.style.background = "rgba(255, 255, 255, 0.08)";
+        btnAutoChat.style.boxShadow = "none";
+        badgeAutoChat.innerText = "";
+      }
+
+      [10, 15, 30, 60].forEach(sec => {
+        const pill = document.getElementById("pill-chat-" + sec);
+        if (pill) pill.className = "pill-btn " + (curChatInterval === sec ? "active" : "");
+      });
+
+      const greetInput = document.getElementById("input-greet");
+      if (s.settings?.autoChatText && document.activeElement !== greetInput && !greetInput.value) {
+        greetInput.value = s.settings.autoChatText;
+      }
+
+      // Formations
+      document.getElementById("pill-corridor").className = "pill-btn " + (s.settings?.corridor ? "active" : "");
+      document.getElementById("pill-rows-3").className = "pill-btn " + (s.settings?.lecture && s.settings?.rows === 3 ? "active" : "");
+      document.getElementById("pill-rows-5").className = "pill-btn " + (s.settings?.lecture && s.settings?.rows === 5 ? "active" : "");
+      document.getElementById("pill-ngang").className = "pill-btn " + (s.settings?.orient === "ngang" ? "active" : "");
+      document.getElementById("pill-doc").className = "pill-btn " + (s.settings?.orient === "doc" ? "active" : "");
+      document.getElementById("pill-front").className = "pill-btn " + (s.settings?.facing === "front" ? "active" : "");
+      document.getElementById("pill-behind").className = "pill-btn " + (s.settings?.facing === "behind" ? "active" : "");
+
+      // Target player
+      targetPlayerName = s.settings?.followTarget || "";
+      const nameInput = document.getElementById("input-name");
+      if (s.settings?.name && document.activeElement !== nameInput && !nameInput.value) {
+        nameInput.value = s.settings.name;
+      }
+
+      // Render players radar
+      renderPlayers(s.players || []);
+
+      // Render disciples
+      renderDisciples(s.disciples || []);
+
+      // Render logs
+      if (s.logs && s.logs.length) {
+        renderLogs(s.logs);
+      }
+    }
+
+    function renderPlayers(players) {
+      const el = document.getElementById("player-list");
+      if (!players.length) {
+        el.innerHTML = '<div style="font-size:11px; color:var(--text-muted); padding:8px; text-align:center;">Chưa có đạo hữu nào khác trong phòng.</div>';
+        return;
+      }
+      let html = "";
+      players.forEach(p => {
+        const isTarget = targetPlayerName && p.name && p.name.toLowerCase().includes(targetPlayerName.toLowerCase());
+        html += `
+          <div class="player-item ${isTarget ? 'targetted' : ''}">
+            <div class="player-info">
+              <span>👤</span>
+              <div>
+                <div class="player-name">${escapeHtml(p.name || "Đạo hữu")}</div>
+                <div class="player-id">ID: ${p.id}</div>
+              </div>
+            </div>
+            <button class="btn-target ${isTarget ? 'active' : ''}" onclick="triggerAction('target ${escapeHtml(p.name)}')">
+              ${isTarget ? 'Đang bám' : '🎯 Bám theo'}
+            </button>
+          </div>
+        `;
+      });
+      el.innerHTML = html;
+    }
+
+    function renderDisciples(disciples) {
+      const el = document.getElementById("disciples-grid");
+      let html = "";
+      disciples.forEach(d => {
+        const statusClass = d.ready ? "ready" : d.connected ? "connecting" : "offline";
+        const statusText = d.ready ? "Chánh điện" : d.connected ? "Đang vào" : "Mất mạng";
+        html += `
+          <div class="disciple-card ${statusClass}">
+            <div class="disciple-top">
+              <span>#${d.index} ${escapeHtml(d.name || "Đệ tử")}</span>
+              <span class="disciple-dot ${statusClass}"></span>
+            </div>
+            <div class="disciple-meta">
+              <span>${statusText}</span>
+              <span>🙏 ${d.bowCount || 0}</span>
+            </div>
+          </div>
+        `;
+      });
+      el.innerHTML = html;
+    }
+
+    function renderLogs(logs) {
+      const el = document.getElementById("console-box");
+      const isAtBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 40;
+      el.innerHTML = logs.map(l => {
+        let cls = "console-line";
+        if (l.includes("[TOR]")) cls += " tor";
+        else if (l.includes("LẠY") || l.includes("🙏")) cls += " bow";
+        else if (l.includes("LỖI") || l.includes("timeout")) cls += " err";
+        else if (l.includes("thành công") || l.includes("SẴN SÀNG")) cls += " succ";
+        return `<div class="${cls}">${escapeHtml(l)}</div>`;
+      }).join("");
+      if (isAtBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    function clearLogs() {
+      document.getElementById("console-box").innerHTML = "";
+    }
+
+    async function triggerAction(cmd) {
+      try {
+        await fetch("/api/cmd", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cmd })
+        });
+        fetchState();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function toggleTor() {
+      triggerAction("tor");
+    }
+
+    function promptChangeRoom() {
+      const current = document.getElementById("val-room").innerText;
+      const next = prompt("Nhập tên phòng chùa muốn chuyển đến:", current);
+      if (next && next.trim()) {
+        triggerAction("room " + next.trim());
+      }
+    }
+
+    function sendGreeting() {
+      const text = document.getElementById("input-greet").value.trim();
+      if (text) {
+        triggerAction("greet " + text);
+      }
+    }
+
+    function changeDisciplesName() {
+      const val = document.getElementById("input-name").value.trim();
+      triggerAction("name " + val);
+      const btn = document.getElementById("btn-rename");
+      if (btn) {
+        btn.innerText = "Đang đổi...";
+        setTimeout(() => { btn.innerText = "Đổi tên"; }, 2500);
+      }
+    }
+
+    function toggleDismiss() {
+      if (isDismissed) {
+        triggerAction("summon");
+      } else {
+        triggerAction("dismiss");
+      }
+    }
+
+    function toggleAutoChat() {
+      const text = document.getElementById("input-greet").value.trim() || "A Di Đà Phật";
+      if (isAutoChat) {
+        triggerAction("autochat off");
+      } else {
+        triggerAction("autochat on " + text);
+      }
+    }
+
+    function setAutoChatInterval(sec) {
+      triggerAction("autochat interval " + sec);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // Spacebar shortcut to bow
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        triggerAction("lay");
+        const btn = document.getElementById("btn-bow-main");
+        btn.style.transform = "scale(0.97)";
+        setTimeout(() => btn.style.transform = "", 150);
+      }
+    });
+
+    // Polling loop
+    fetchState();
+    setInterval(fetchState, 1000);
+  </script>
+</body>
+</html>
+
