@@ -14,6 +14,7 @@ Tiện ích tự động di chuyển nhân vật, thực hiện đầy đủ chu
 ---
 
 ## ✨ Tính năng tự động (v2.0)
+- **Bầy đệ tử ngầm CLI (100 đệ tử)**: Chạy đệ tử quy mô lớn trực tiếp trong Terminal (**0% GPU, < 15MB RAM, 0 tab trình duyệt, 0 npm packages**), tích hợp **Tor Multi-Circuit** (mỗi đệ tử 1 IP riêng biệt), xoay vòng proxy riêng hoặc cào 3.000+ SOCKS5 miễn phí. Tự động bám theo Acc chính, quỳ lạy đồng loạt, xếp hàng nghe thuyết pháp, 2 hàng danh dự, khinh công lướt mây. 👉 Xem chi tiết tại: [**`HUONG_DAN_100_DE_TU.md`**](HUONG_DAN_100_DE_TU.md).
 - **Thời khóa**: Tự dâng hương Sân chùa, lạy 3 lạy & hoàn tất thời khóa (`tk-done`), tùy chọn gửi sự kiện chia sẻ ảnh (`khoe`).
 - **Tàng Kinh Các**: Tự mở và đọc bài Tàng Kinh Các (`tk-read`).
 - **Hương & Lạy Chánh điện**: Tự dịch chuyển tới Chánh điện, dâng hương (`incense`) và lạy Phật (`lay`).

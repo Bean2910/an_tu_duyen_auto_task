@@ -387,6 +387,32 @@ if (proxyFile && fs.existsSync(proxyFile)) {
   }
 }
 let isTorMode = args.includes("--tor");
+let torPort = parseInt(getArg("tor-port", "9050"), 10) || 9050;
+
+function detectTorPort() {
+  return new Promise((resolve) => {
+    const s = net.connect(9050, "127.0.0.1", () => {
+      s.destroy();
+      resolve(9050);
+    });
+    s.on("error", () => {
+      const s2 = net.connect(9150, "127.0.0.1", () => {
+        s2.destroy();
+        resolve(9150);
+      });
+      s2.on("error", () => resolve(9050));
+      s2.setTimeout(400, () => {
+        try { s2.destroy(); } catch {}
+        resolve(9050);
+      });
+    });
+    s.setTimeout(400, () => {
+      try { s.destroy(); } catch {}
+      resolve(9050);
+    });
+  });
+}
+
 let autoFreeProxy = args.includes("--free-proxy") || args.includes("--auto-proxy") || args.includes("--free");
 
 const failedProxies = new Map();
@@ -407,7 +433,7 @@ function getProxyForDisciple(index, attempt = 0) {
   if (isTorMode) {
     // Tor SOCKS5 Multi-Circuit Isolation (RFC 1928 / RFC 1929)
     // Mỗi đệ tử kết nối với 1 username riêng: Tor tự động phân phối mỗi đệ tử 1 đường truyền (circuit) và 1 IP riêng biệt hoàn toàn!
-    return `socks5://d_${index}_${attempt}:torpass@127.0.0.1:9050`;
+    return `socks5://d_${index}_${attempt}:torpass@127.0.0.1:${torPort}`;
   }
   if (!proxyList || proxyList.length === 0) return null;
   const idx = ((index - 1) + attempt) % proxyList.length;
@@ -1303,7 +1329,7 @@ function printHeader() {
   console.log(`\x1b[32m▶ Tự động lạy    :\x1b[0m ${autoBow ? "BẬT (Mỗi 7.5s)" : "TẮT (Nhấn Space / Enter để lạy)"}`);
   let proxyStatus = "TẮT (Kết nối trực tiếp)";
   if (isTorMode) {
-    proxyStatus = "BẬT TOR MULTI-CIRCUIT (127.0.0.1:9050 - Mỗi đệ tử 1 IP riêng biệt)";
+    proxyStatus = `BẬT TOR MULTI-CIRCUIT (127.0.0.1:${torPort} - Mỗi đệ tử 1 IP riêng biệt)`;
   } else if (autoFreeProxy) {
     proxyStatus = `TỰ ĐỘNG CÀO (${proxyList.length} SOCKS5 Free)`;
   } else if (proxyList.length === 1) {
@@ -1342,7 +1368,9 @@ function printHeader() {
 }
 
 async function startAll() {
-  if (!isTorMode && autoFreeProxy && proxyList.length === 0) {
+  if (isTorMode) {
+    torPort = await detectTorPort();
+  } else if (autoFreeProxy && proxyList.length === 0) {
     console.log("\x1b[33m[PROXY] Đang tự động cào danh sách Proxy SOCKS5 sống miễn phí...\x1b[0m");
     await fetchFreeProxies();
   }
