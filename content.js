@@ -747,26 +747,34 @@
         log("⚠️ Đệ tử chưa bật, vui lòng bật đệ tử trước khi hô chào!", "warn");
         return;
       }
+      if (this.isShouting) return;
       const readyDisciples = this.disciples.filter((d) => d.connected && d.ready && d.ws);
       if (readyDisciples.length === 0) {
         log("⏳ Các đệ tử đang kết nối, vui lòng chờ giây lát...", "wait");
         return;
       }
 
-      const msg = customMsg || this.formatGreetingMessage();
-      const targetName = this.getChosenTargetName();
-      log(`📣 [ĐỒNG THANH CHÀO] Các đệ tử bắt đầu hô: "${msg}" gửi đến ${targetName}!`, "ok");
+      this.isShouting = true;
+      try {
+        const msg = customMsg || this.formatGreetingMessage();
+        const targetName = this.getChosenTargetName();
+        log(`📣 [ĐỒNG THANH CHÀO] Toàn bộ ${readyDisciples.length} đệ tử ở tất cả các hàng bắt đầu hô: "${msg}" gửi đến ${targetName}!`, "ok");
 
-      const shoutLimit = Math.min(6, readyDisciples.length);
-      for (let i = 0; i < shoutLimit; i++) {
-        const d = readyDisciples[i];
-        try {
-          d.ws.send(JSON.stringify({ t: "emote", e: "chap" }));
-          d.ws.send(JSON.stringify({ t: "chat", text: msg }));
-        } catch {}
-        if (i < shoutLimit - 1) {
-          await sleep(350);
+        // Gửi lệnh chắp tay và chat cho TOÀN BỘ đệ tử ở TẤT CẢ các hàng
+        // Dãn cách ngắn 40ms - 60ms để tạo hiệu ứng âm thanh đồng thanh vang dội và bong bóng chat phủ kín toàn bộ các hàng mà không bị trôi
+        const delay = readyDisciples.length > 25 ? 40 : 60;
+        for (let i = 0; i < readyDisciples.length; i++) {
+          const d = readyDisciples[i];
+          try {
+            d.ws.send(JSON.stringify({ t: "emote", e: "chap" }));
+            d.ws.send(JSON.stringify({ t: "chat", text: msg }));
+          } catch {}
+          if (i < readyDisciples.length - 1) {
+            await sleep(delay);
+          }
         }
+      } finally {
+        this.isShouting = false;
       }
     }
 

@@ -814,24 +814,31 @@ function adjustDiscipleCount(newCount) {
   }
 }
 
+let isShoutingGreeting = false;
 async function shoutGreeting(customMsg) {
+  if (isShoutingGreeting) return;
   const readyDisciples = disciples.filter((d) => d.ready && d.ws);
   if (readyDisciples.length === 0) {
     console.log("\x1b[33m[CHÀO] Chưa có đệ tử nào sẵn sàng!\x1b[0m");
     return;
   }
-  const msg = (customMsg || "A Di Đà Phật! Kính chào quý sếp và chư vị đạo hữu!").trim();
-  console.log(`\x1b[32m[ĐỒNG THANH CHÀO] Các đệ tử bắt đầu hô: "${msg}"\x1b[0m`);
-  const shoutLimit = Math.min(6, readyDisciples.length);
-  for (let i = 0; i < shoutLimit; i++) {
-    const d = readyDisciples[i];
-    try {
-      d.send({ t: "emote", e: "chap" });
-      d.send({ t: "chat", text: msg });
-    } catch {}
-    if (i < shoutLimit - 1) {
-      await new Promise((r) => setTimeout(r, 350));
+  isShoutingGreeting = true;
+  try {
+    const msg = (customMsg || "A Di Đà Phật! Kính chào quý sếp và chư vị đạo hữu!").trim();
+    console.log(`\x1b[32m[ĐỒNG THANH CHÀO] Toàn bộ ${readyDisciples.length} đệ tử ở tất cả các hàng bắt đầu hô: "${msg}"\x1b[0m`);
+    const delay = readyDisciples.length > 25 ? 40 : 60;
+    for (let i = 0; i < readyDisciples.length; i++) {
+      const d = readyDisciples[i];
+      try {
+        d.send({ t: "emote", e: "chap" });
+        d.send({ t: "chat", text: msg });
+      } catch {}
+      if (i < readyDisciples.length - 1) {
+        await new Promise((r) => setTimeout(r, delay));
+      }
     }
+  } finally {
+    isShoutingGreeting = false;
   }
 }
 
