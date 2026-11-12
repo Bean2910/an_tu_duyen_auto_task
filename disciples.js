@@ -89,6 +89,9 @@ class PureWebSocket {
     const pProtocol = pUrl.protocol.replace(":", "");
     const pHost = pUrl.hostname;
     const pPort = parseInt(pUrl.port, 10) || (pProtocol.startsWith("socks") ? 1080 : 8080);
+    const hasAuth = !!(pUrl.username || pUrl.password);
+    const pUser = decodeURIComponent(pUrl.username || "");
+    const pPass = decodeURIComponent(pUrl.password || "");
 
     const raw = net.connect(pPort, pHost, () => {
       if (raw.setKeepAlive) raw.setKeepAlive(true, 10000);
@@ -98,34 +101,67 @@ class PureWebSocket {
       });
 
       if (pProtocol.startsWith("socks")) {
-        // SOCKS5 Handshake
-        raw.write(Buffer.from([0x05, 0x01, 0x00]));
+        // SOCKS5 Handshake with Auth support (RFC 1928 / RFC 1929)
+        const greeting = hasAuth
+          ? Buffer.from([0x05, 0x02, 0x00, 0x02]) // Method 0x00: No Auth, 0x02: User/Pass
+          : Buffer.from([0x05, 0x01, 0x00]);
+        raw.write(greeting);
         raw.once("data", (authResp) => {
-          if (authResp[0] !== 0x05 || authResp[1] !== 0x00) {
-            this._handleError(new Error("SOCKS5 proxy từ chối kết nối (Auth failed)"));
+          if (authResp[0] !== 0x05 || (authResp[1] !== 0x00 && authResp[1] !== 0x02)) {
+            this._handleError(new Error("SOCKS5 proxy từ chối kết nối"));
             return;
           }
-          const hostBuf = Buffer.from(targetHost);
-          const portBuf = Buffer.alloc(2);
-          portBuf.writeUInt16BE(targetPort, 0);
-          const connReq = Buffer.concat([
-            Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
-            hostBuf,
-            portBuf
-          ]);
-          raw.write(connReq);
-          raw.once("data", (connResp) => {
-            if (connResp[1] !== 0x00) {
-              this._handleError(new Error(`SOCKS5 connect error mã ${connResp[1]}`));
-              return;
-            }
-            raw.setTimeout(0);
-            this._upgradeToTlsOrHandshake(raw, targetHost, isWss);
-          });
+
+          const sendConnect = () => {
+            const hostBuf = Buffer.from(targetHost);
+            const portBuf = Buffer.alloc(2);
+            portBuf.writeUInt16BE(targetPort, 0);
+            const connReq = Buffer.concat([
+              Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
+              hostBuf,
+              portBuf
+            ]);
+            raw.write(connReq);
+            raw.once("data", (connResp) => {
+              if (connResp[1] !== 0x00) {
+                this._handleError(new Error(`SOCKS5 connect error mã ${connResp[1]}`));
+                return;
+              }
+              raw.setTimeout(0);
+              this._upgradeToTlsOrHandshake(raw, targetHost, isWss);
+            });
+          };
+
+          if (authResp[1] === 0x02) {
+            // Gửi xác thực Username/Password Subnegotiation (Hỗ trợ Tor Multi-Circuit Isolation & Private Proxies)
+            const uBuf = Buffer.from(pUser);
+            const pBuf = Buffer.from(pPass);
+            const subneg = Buffer.concat([
+              Buffer.from([0x01, uBuf.length]),
+              uBuf,
+              Buffer.from([pBuf.length]),
+              pBuf
+            ]);
+            raw.write(subneg);
+            raw.once("data", (subResp) => {
+              if (subResp[1] !== 0x00) {
+                this._handleError(new Error("SOCKS5 xác thực username/password thất bại"));
+                return;
+              }
+              sendConnect();
+            });
+          } else {
+            sendConnect();
+          }
         });
       } else {
-        // HTTP CONNECT Tunnel
-        const req = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\nProxy-Connection: Keep-Alive\r\n\r\n`;
+        // HTTP CONNECT Tunnel with Basic Auth support
+        let authHeader = "";
+        if (hasAuth) {
+          const b64 = Buffer.from(`${pUser}:${pPass}`).toString("base64");
+          authHeader = `Proxy-Authorization: Basic ${b64}\r\n`;
+        }
+        const req = `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${authHeader}Proxy-Connection: Keep-Alive\r\n\r\n`;
         raw.write(req);
         raw.once("data", (resp) => {
           const respStr = resp.toString("utf8");
@@ -337,15 +373,20 @@ const rawProxy = getArg("proxy", "") || getArg("vpn", "");
 if (rawProxy) {
   proxyList = rawProxy.split(",").map((p) => p.trim()).filter(Boolean);
 }
-const proxyFile = getArg("proxy-file", "") || getArg("proxies", "");
+const defaultProxyFile = "proxies.txt";
+const proxyFile = getArg("proxy-file", "") || getArg("proxies", "") || (fs.existsSync(defaultProxyFile) ? defaultProxyFile : "");
 if (proxyFile && fs.existsSync(proxyFile)) {
   try {
     const lines = fs.readFileSync(proxyFile, "utf8").split("\n").map((s) => s.trim()).filter((s) => s && !s.startsWith("#"));
-    proxyList = proxyList.concat(lines);
+    if (lines.length > 0) {
+      proxyList = proxyList.concat(lines);
+      console.log(`\x1b[32m[PROXY] Đã nạp ${lines.length} proxy từ file ${proxyFile}!\x1b[0m`);
+    }
   } catch (err) {
     console.warn(`[PROXY] Không đọc được file ${proxyFile}: ${err.message}`);
   }
 }
+let isTorMode = args.includes("--tor");
 let autoFreeProxy = args.includes("--free-proxy") || args.includes("--auto-proxy") || args.includes("--free");
 
 const failedProxies = new Map();
@@ -363,33 +404,57 @@ function markProxyFailed(proxy) {
 }
 
 function getProxyForDisciple(index, attempt = 0) {
+  if (isTorMode) {
+    // Tor SOCKS5 Multi-Circuit Isolation (RFC 1928 / RFC 1929)
+    // Mỗi đệ tử kết nối với 1 username riêng: Tor tự động phân phối mỗi đệ tử 1 đường truyền (circuit) và 1 IP riêng biệt hoàn toàn!
+    return `socks5://d_${index}_${attempt}:torpass@127.0.0.1:9050`;
+  }
   if (!proxyList || proxyList.length === 0) return null;
   const idx = ((index - 1) + attempt) % proxyList.length;
   return proxyList[idx];
 }
 
-function fetchFreeProxies() {
+function fetchHttpText(url, timeoutMs = 4000) {
   return new Promise((resolve) => {
-    // Ưu tiên tải proxy phản hồi nhanh (timeout <= 2500ms) để giảm thiểu tối đa rớt mạng
-    const url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=2500&country=all";
-    https.get(url, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        const lines = data.split("\n").map((s) => s.trim()).filter((s) => s && s.includes(":"));
-        if (lines.length > 0) {
-          proxyList = lines.map((p) => (p.startsWith("socks5://") ? p : `socks5://${p}`));
-          console.log(`\x1b[32m[PROXY] Đã tự động tải về ${proxyList.length} Proxy SOCKS5 tốc độ cao!\x1b[0m`);
-        } else {
-          console.log("\x1b[31m[PROXY] Không lấy được proxy tự động, sẽ thử kết nối trực tiếp.\x1b[0m");
-        }
-        resolve(proxyList);
+    try {
+      const req = https.get(url, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => resolve(data));
       });
-    }).on("error", (err) => {
-      console.log(`\x1b[31m[PROXY] Lỗi tải proxy: ${err.message}\x1b[0m`);
-      resolve([]);
-    });
+      req.on("error", () => resolve(""));
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        resolve("");
+      });
+    } catch {
+      resolve("");
+    }
   });
+}
+
+async function fetchFreeProxies() {
+  console.log("\x1b[33m[PROXY] Đang tự động gộp proxy SOCKS5 từ Proxyscrape & GitHub...\x1b[0m");
+  const [t1, t2] = await Promise.all([
+    fetchHttpText("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=2500&country=all"),
+    fetchHttpText("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt")
+  ]);
+  const set = new Set();
+  const addLines = (text) => {
+    if (!text) return;
+    text.split("\n").map((s) => s.trim()).filter((s) => s && s.includes(":") && !s.startsWith("#")).forEach((p) => {
+      set.add(p.startsWith("socks5://") ? p : `socks5://${p}`);
+    });
+  };
+  addLines(t1);
+  addLines(t2);
+  if (set.size > 0) {
+    proxyList = Array.from(set);
+    console.log(`\x1b[32m[PROXY] Đã gộp thành công ${proxyList.length} Proxy SOCKS5 sẵn sàng sử dụng!\x1b[0m`);
+  } else {
+    console.log("\x1b[31m[PROXY] Không lấy được proxy tự động, sẽ thử kết nối trực tiếp.\x1b[0m");
+  }
+  return proxyList;
 }
 
 // Tùy chọn trang phục, màu áo, pháp khí, tràng hạt, bồ đoàn ngẫu nhiên
@@ -1237,7 +1302,9 @@ function printHeader() {
   console.log(`\x1b[32m▶ Bám theo người :\x1b[0m ${followPlayer ? "BẬT (Tự động đi theo người chơi khác)" : "TẮT (Đi dạo tự do)"}`);
   console.log(`\x1b[32m▶ Tự động lạy    :\x1b[0m ${autoBow ? "BẬT (Mỗi 7.5s)" : "TẮT (Nhấn Space / Enter để lạy)"}`);
   let proxyStatus = "TẮT (Kết nối trực tiếp)";
-  if (autoFreeProxy) {
+  if (isTorMode) {
+    proxyStatus = "BẬT TOR MULTI-CIRCUIT (127.0.0.1:9050 - Mỗi đệ tử 1 IP riêng biệt)";
+  } else if (autoFreeProxy) {
     proxyStatus = `TỰ ĐỘNG CÀO (${proxyList.length} SOCKS5 Free)`;
   } else if (proxyList.length === 1) {
     proxyStatus = `BẬT (${proxyList[0]})`;
@@ -1261,6 +1328,7 @@ function printHeader() {
   console.log("  • \x1b[1;33mGõ 'front' / 'behind'\x1b[0m       : Ngồi trước mặt đối diện hoặc sau lưng sư phụ");
   console.log("  • \x1b[1;33mGõ 'greet <câu>' hoặc 'chao'\x1b[0m: Cho các đệ tử chắp tay hô chào");
   console.log("  • \x1b[1;33mGõ 'kemten' hoặc 'tagname'\x1b[0m   : Bật/tắt kèm tên người theo dõi khi chat");
+  console.log("  • \x1b[1;33mGõ 'tor' + Enter\x1b[0m          : Bật/tắt chế độ Tor Multi-Circuit (cần mở tor)");
   console.log("  • \x1b[1;33mGõ 'proxy <url>' + Enter\x1b[0m  : Đổi proxy (VD: proxy socks5://127.0.0.1:40000)");
   console.log("  • \x1b[1;33mGõ 'freeproxy' + Enter\x1b[0m    : Tự động cào danh sách Proxy SOCKS5 miễn phí");
   console.log("  • \x1b[1;33mGõ 'noproxy' + Enter\x1b[0m      : Tắt proxy, trở về kết nối trực tiếp");
@@ -1274,7 +1342,7 @@ function printHeader() {
 }
 
 async function startAll() {
-  if (autoFreeProxy && proxyList.length === 0) {
+  if (!isTorMode && autoFreeProxy && proxyList.length === 0) {
     console.log("\x1b[33m[PROXY] Đang tự động cào danh sách Proxy SOCKS5 sống miễn phí...\x1b[0m");
     await fetchFreeProxies();
   }
@@ -1411,18 +1479,25 @@ rl.on("line", (line) => {
   } else if (cmd === "tagname" || cmd === "kemten" || cmd === "greetname") {
     greetIncludeName = !greetIncludeName;
     console.log(`\x1b[35m[KÈM TÊN CHAT] Đã ${greetIncludeName ? "BẬT (kèm tên người theo dõi)" : "TẮT (chỉ chat nội dung bạn nhập)"}!\x1b[0m`);
+  } else if (cmd === "tor") {
+    isTorMode = !isTorMode;
+    if (isTorMode) autoFreeProxy = false;
+    console.log(`\x1b[32m[TOR] Đã ${isTorMode ? "BẬT (Mỗi đệ tử 1 mạch IP riêng biệt qua 127.0.0.1:9050 - Tor Multi-Circuit)" : "TẮT"} chế độ Tor!\x1b[0m`);
+    disciples.forEach((d) => d.reconnect());
   } else if (cmd.startsWith("proxy ") || cmd === "proxy") {
     const newProxy = line.trim().replace(/^proxy\s*/, "").trim();
     if (!newProxy) {
-      console.log(`\x1b[36m[PROXY HIỆN TẠI] ${proxyList.length ? proxyList.join(", ") : "Không dùng (Kết nối trực tiếp)"}\x1b[0m`);
+      console.log(`\x1b[36m[PROXY HIỆN TẠI] ${isTorMode ? "Tor Multi-Circuit (127.0.0.1:9050)" : (proxyList.length ? proxyList.join(", ") : "Không dùng (Kết nối trực tiếp)")}\x1b[0m`);
     } else {
       proxyList = [newProxy];
       autoFreeProxy = false;
+      isTorMode = false;
       console.log(`\x1b[32m[PROXY] Đã đặt proxy mới: ${newProxy}! Đang kết nối lại các đệ tử...\x1b[0m`);
       disciples.forEach((d) => d.reconnect());
     }
   } else if (cmd === "freeproxy" || cmd === "autoproxy") {
     autoFreeProxy = true;
+    isTorMode = false;
     console.log("\x1b[33m[PROXY] Đang tải mới danh sách Proxy SOCKS5 miễn phí...\x1b[0m");
     fetchFreeProxies().then(() => {
       disciples.forEach((d) => d.reconnect());
@@ -1430,6 +1505,7 @@ rl.on("line", (line) => {
   } else if (cmd === "noproxy" || cmd === "tatproxy") {
     proxyList = [];
     autoFreeProxy = false;
+    isTorMode = false;
     console.log("\x1b[33m[PROXY] Đã TẮT proxy, chuyển về kết nối trực tiếp!\x1b[0m");
     disciples.forEach((d) => d.reconnect());
   } else if (cmd === "players" || cmd === "list" || cmd === "danhsach" || cmd === "peers") {
