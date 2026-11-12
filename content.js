@@ -337,12 +337,40 @@
       this.formationMode = localStorage.getItem("atd_headless_mode") || "hall"; // "hall" | "roam"
       this.customName = (localStorage.getItem("atd_headless_name") || "").trim();
       this.autoNumber = localStorage.getItem("atd_headless_autonumber") !== "false";
+      this.airWalk = localStorage.getItem("atd_headless_airwalk") === "true";
       this.enabled = false;
       this.heartbeatTimer = null;
       this.refreshTimer = null;
       this.roamInterval = null;
       this.spawnTimers = [];
       this.reconnectTimers = [];
+    }
+
+    setAirWalk(enabled) {
+      this.airWalk = !!enabled;
+      localStorage.setItem("atd_headless_airwalk", this.airWalk ? "true" : "false");
+      const altitude = this.airWalk ? 3.2 : 0;
+      log(this.airWalk ? "☁️ [KHINH CÔNG] Đã bật chế độ Đi trên không (lướt mây bay lượn)!" : "🌍 Đã hạ cánh: Đệ tử tiếp đất đi lại bình thường.", "info");
+      this.disciples.forEach((d) => {
+        if (d.ws && d.ws.readyState === WebSocket.OPEN) {
+          if (!d.pos) {
+            d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+          }
+          const baseY = (this.formationMode === "hall") ? 2.4 : getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.round((baseY + altitude) * 100) / 100;
+          try {
+            d.ws.send(JSON.stringify({
+              t: "state",
+              x: d.pos.x,
+              y: d.pos.y,
+              z: d.pos.z,
+              ry: d.pos.ry,
+              s: (d.idleTimer && d.idleTimer > 0) ? 0 : 1
+            }));
+          } catch {}
+        }
+      });
+      this.updateUI();
     }
 
     getDiscipleName(index) {
@@ -488,7 +516,8 @@
             disciple.ready = true;
             if (this.formationMode === "roam") {
               const lm = MAP_LANDMARKS[(index - 1) % MAP_LANDMARKS.length];
-              const groundY = getGroundY(lm.x, lm.z);
+              const altitude = this.airWalk ? 3.2 : 0;
+              const groundY = Math.round((getGroundY(lm.x, lm.z) + altitude) * 100) / 100;
               disciple.pos = { x: lm.x, y: groundY, z: lm.z, ry: 0 };
               disciple.currentZone = lm.zone;
               try {
@@ -542,16 +571,18 @@
 
     sendToHall(disciple) {
       if (disciple.ws && disciple.ws.readyState === WebSocket.OPEN) {
+        const y = Math.round((2.4 + (this.airWalk ? 3.0 : 0)) * 100) / 100;
         try {
           disciple.ws.send(JSON.stringify({ t: "visit", zone: "Chánh điện" }));
           disciple.ws.send(JSON.stringify({
             t: "state",
             x: disciple.offset.x,
-            y: 2.4,
+            y: y,
             z: disciple.offset.z,
             ry: Math.PI,
             s: 0
           }));
+          disciple.pos = { x: disciple.offset.x, y: y, z: disciple.offset.z, ry: Math.PI };
         } catch {}
       }
     }
@@ -613,13 +644,14 @@
 
     stepRoaming() {
       const now = Date.now();
+      const altitude = this.airWalk ? 3.2 : 0;
       this.disciples.forEach((d) => {
         if (!d.ready || !d.ws || d.ws.readyState !== WebSocket.OPEN) return;
 
         if (!d.pos) {
           d.pos = {
             x: d.offset.x,
-            y: getGroundY(d.offset.x, d.offset.z),
+            y: Math.round((getGroundY(d.offset.x, d.offset.z) + altitude) * 100) / 100,
             z: d.offset.z,
             ry: Math.PI
           };
@@ -631,7 +663,7 @@
           // Gửi trạng thái nghỉ mỗi 2.5s để giữ đồng bộ
           if (!d.lastStateSend || now - d.lastStateSend >= 2500) {
             d.lastStateSend = now;
-            d.pos.y = getGroundY(d.pos.x, d.pos.z);
+            d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
             try {
               d.ws.send(JSON.stringify({
                 t: "state",
@@ -666,7 +698,7 @@
         if (dist < 1.5) {
           d.idleTimer = Math.floor(Math.random() * 16) + 15;
           d.targetWaypoint = null;
-          d.pos.y = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
           d.lastStateSend = now;
           try {
             d.ws.send(JSON.stringify({
@@ -688,8 +720,8 @@
 
         d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
         d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
-        // Bám sát mặt đất chính xác theo địa hình (không bay trên trời)
-        d.pos.y = getGroundY(d.pos.x, d.pos.z);
+        // Bám sát mặt đất hoặc bay trên không nếu bật khinh công
+        d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
         d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
         d.lastStateSend = now;
 
@@ -723,10 +755,11 @@
 
       log("🏛️ Đã triệu tập toàn bộ đệ tử về Chánh điện xếp hàng trang nghiêm!", "ok");
 
+      const hallY = Math.round((2.4 + (this.airWalk ? 3.0 : 0)) * 100) / 100;
       this.disciples.forEach((d) => {
         d.idleTimer = 0;
         d.targetWaypoint = null;
-        d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+        d.pos = { x: d.offset.x, y: hallY, z: d.offset.z, ry: Math.PI };
         d.currentZone = "Chánh điện";
         this.sendToHall(d);
       });
@@ -819,8 +852,14 @@
       if (btnHall) btnHall.classList.toggle("active", this.formationMode === "hall");
       if (btnRoam) btnRoam.classList.toggle("active", this.formationMode === "roam");
       if (modeBadge) {
-        modeBadge.textContent = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : "🏃 Đi dạo tự do khắp chùa";
-        modeBadge.style.color = this.formationMode === "hall" ? "#e5bc72" : "#38bdf8";
+        let text = this.formationMode === "hall" ? "🏛️ Tập trung Chánh điện" : "🏃 Đi dạo tự do khắp chùa";
+        if (this.airWalk) text += " · ☁️ Khinh công";
+        modeBadge.textContent = text;
+        modeBadge.style.color = this.airWalk ? "#c084fc" : (this.formationMode === "hall" ? "#e5bc72" : "#38bdf8");
+      }
+      const chkAirWalk = $("#atd-chk-airwalk");
+      if (chkAirWalk) {
+        chkAirWalk.checked = this.airWalk;
       }
 
       if (input && document.activeElement !== input) {
@@ -4780,6 +4819,13 @@
                 🏃 Đi dạo khắp bản đồ
               </button>
             </div>
+            <!-- Chức năng Đi trên không (Khinh công lướt mây) -->
+            <div class="atd-airwalk-box">
+              <label class="atd-airwalk-label" title="Bật để đệ tử bay lượn lơ lửng trên không trung như mây trời / khinh công (cho vui nhộn)">
+                <input type="checkbox" id="atd-chk-airwalk" />
+                <span>☁️ <b>Đi trên không</b> (Khinh công lướt mây)</span>
+              </label>
+            </div>
             <div class="atd-clone-btns" style="margin-top:4px;">
               <button type="button" class="atd-clone-btn lead" id="atd-btn-headless-bow" title="Lệnh cho đệ tử ngầm lạy trước rồi Chủ trì lạy theo để gặt trọn công đức Đồng Tâm">
                 🙏 Phát động Lạy (Đệ tử trước)
@@ -5039,6 +5085,14 @@
     if (btnModeRoam) {
       btnModeRoam.addEventListener("click", () => {
         headlessDisciples.startRoaming();
+      });
+    }
+
+    const chkAirWalk = $("#atd-chk-airwalk", panel);
+    if (chkAirWalk) {
+      chkAirWalk.checked = headlessDisciples.airWalk;
+      chkAirWalk.addEventListener("change", () => {
+        headlessDisciples.setAirWalk(chkAirWalk.checked);
       });
     }
 

@@ -1410,6 +1410,41 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #e5bc72;
 }
+.atd-airwalk-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px dashed rgba(167, 139, 250, 0.45);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin: 4px 0 2px 0;
+  transition: all 0.2s ease;
+}
+.atd-airwalk-box:hover {
+  background: rgba(167, 139, 250, 0.1);
+  border-color: rgba(167, 139, 250, 0.7);
+}
+.atd-airwalk-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #ddd6fe;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+.atd-airwalk-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #8b5cf6;
+  margin: 0;
+  width: 13px;
+  height: 13px;
+}
+.atd-airwalk-label:hover {
+  color: #fff;
+}
 .atd-scale-info {
   font-size: 11px;
   line-height: 1.45;

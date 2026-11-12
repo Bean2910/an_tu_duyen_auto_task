@@ -50,6 +50,7 @@ const targetCount = parseInt(getArg("count", "4"), 10) || 4;
 let targetRoom = getArg("room", "chua-1");
 let customName = getArg("name", "");
 let autoBow = args.includes("--auto");
+let airWalk = args.includes("--air") || args.includes("--fly");
 const SERVER_URL = "wss://didenchua.online/ws";
 
 // Tính toán độ cao mặt đất chính xác theo bản đồ chùa để không bị đi trên không
@@ -198,14 +199,16 @@ class Disciple {
 
   enterChanhDien() {
     this.send({ t: "visit", zone: "Chánh điện" });
+    const y = Math.round((2.4 + (airWalk ? 3.0 : 0)) * 100) / 100;
     this.send({
       t: "state",
       x: this.offset.x,
-      y: 2.4,
+      y: y,
       z: this.offset.z,
       ry: Math.PI,
       s: 0
     });
+    this.pos = { x: this.offset.x, y: y, z: this.offset.z, ry: Math.PI };
   }
 
   startHeartbeat() {
@@ -282,6 +285,7 @@ function startRoaming() {
   formationMode = "roam";
   console.log("\x1b[36m[HÀNH TUNG] Đã kích hoạt Chế độ Đi dạo: Đệ tử tản ra đi lại tự do khắp bản đồ chùa!\x1b[0m");
 
+  const alt = airWalk ? 3.2 : 0;
   disciples.forEach((d, idx) => {
     d.idleTimer = 0;
     d.lastStateSend = 0;
@@ -294,7 +298,7 @@ function startRoaming() {
       zone: lm.zone
     };
     if (!d.pos) {
-      d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+      d.pos = { x: d.offset.x, y: Math.round((2.4 + alt) * 100) / 100, z: d.offset.z, ry: Math.PI };
     }
   });
 
@@ -302,16 +306,17 @@ function startRoaming() {
   roamTimer = setInterval(() => {
     if (formationMode !== "roam") return;
     const now = Date.now();
+    const altitude = airWalk ? 3.2 : 0;
     disciples.forEach((d) => {
       if (!d.ready || !d.ws) return;
-      if (!d.pos) d.pos = { x: d.offset.x, y: 2.4, z: d.offset.z, ry: Math.PI };
+      if (!d.pos) d.pos = { x: d.offset.x, y: Math.round((2.4 + altitude) * 100) / 100, z: d.offset.z, ry: Math.PI };
 
       // Nghỉ chân tại chỗ: chỉ gửi keepalive mỗi 2.5s để tiết kiệm đường truyền
       if (d.idleTimer > 0) {
         d.idleTimer--;
         if (!d.lastStateSend || now - d.lastStateSend > 2500) {
           d.lastStateSend = now;
-          d.pos.y = getGroundY(d.pos.x, d.pos.z);
+          d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
           d.send({
             t: "state",
             x: d.pos.x,
@@ -344,7 +349,7 @@ function startRoaming() {
       if (dist < 1.5) {
         d.idleTimer = Math.floor(Math.random() * 16) + 15;
         d.targetWaypoint = null;
-        d.pos.y = getGroundY(d.pos.x, d.pos.z);
+        d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
         d.lastStateSend = now;
         d.send({
           t: "state",
@@ -363,7 +368,7 @@ function startRoaming() {
       const moveZ = (dz / dist) * Math.min(stepDist, dist);
       d.pos.x = Math.round((d.pos.x + moveX) * 100) / 100;
       d.pos.z = Math.round((d.pos.z + moveZ) * 100) / 100;
-      d.pos.y = getGroundY(d.pos.x, d.pos.z);
+      d.pos.y = Math.round((getGroundY(d.pos.x, d.pos.z) + altitude) * 100) / 100;
       d.pos.ry = Math.round(Math.atan2(dx, dz) * 100) / 100;
       d.lastStateSend = now;
 
@@ -391,9 +396,11 @@ function recallToHall() {
   if (roamTimer) clearInterval(roamTimer);
   roamTimer = null;
   console.log("\x1b[32m[TRIỆU TẬP] Đã gom toàn bộ đệ tử về Chánh điện xếp hàng bồ đoàn trang nghiêm!\x1b[0m");
+  const hallY = Math.round((2.4 + (airWalk ? 3.0 : 0)) * 100) / 100;
   disciples.forEach((d) => {
     d.idleTimer = 0;
     d.targetWaypoint = null;
+    d.pos = { x: d.offset.x, y: hallY, z: d.offset.z, ry: Math.PI };
     d.enterChanhDien();
   });
 }
@@ -449,6 +456,7 @@ function printHeader() {
   console.log(`\x1b[32m▶ Số lượng đệ tử :\x1b[0m ${targetCount}`);
   console.log(`\x1b[32m▶ Tên đệ tử      :\x1b[0m ${customName || "Đệ tử ngầm (mặc định)"}`);
   console.log(`\x1b[32m▶ Phòng chùa     :\x1b[0m ${targetRoom}`);
+  console.log(`\x1b[32m▶ Đi trên không  :\x1b[0m ${airWalk ? "BẬT (Khinh công lướt mây)" : "TẮT (Đi bộ tiếp đất)"}`);
   console.log(`\x1b[32m▶ Tự động lạy    :\x1b[0m ${autoBow ? "BẬT (Mỗi 7.5s)" : "TẮT (Nhấn Space / Enter để lạy)"}`);
   console.log(`\x1b[32m▶ Tài nguyên     :\x1b[0m 0% GPU, < 15MB RAM, 0 tab trình duyệt`);
   console.log("\x1b[1;36m------------------------------------------------------------------------\x1b[0m");
@@ -456,6 +464,7 @@ function printHeader() {
   console.log("  • \x1b[1;33mNhấn phím Space hoặc Enter\x1b[0m: Toàn bộ đệ tử lạy ngay lập tức");
   console.log("  • \x1b[1;33mGõ 'roam' + Enter\x1b[0m         : Cho đệ tử tản ra đi dạo tự do khắp bản đồ chùa");
   console.log("  • \x1b[1;33mGõ 'hall' + Enter\x1b[0m         : Triệu tập toàn bộ đệ tử về Chánh điện xếp hàng");
+  console.log("  • \x1b[1;33mGõ 'air' hoặc 'fly' + Enter\x1b[0m : Bật/tắt chế độ Đi trên không (Khinh công)");
   console.log("  • \x1b[1;33mGõ 'count <số>' + Enter\x1b[0m   : Đổi số lượng đệ tử (VD: count 6)");
   console.log("  • \x1b[1;33mGõ 'name <tên>' + Enter\x1b[0m   : Đổi tên đệ tử (VD: name Thích Tuệ Minh)");
   console.log("  • \x1b[1;33mGõ 'auto' + Enter\x1b[0m        : Bật/tắt tự động lạy theo chu kỳ");
@@ -505,6 +514,24 @@ rl.on("line", (line) => {
       d.name = d.formatName(d.index);
     });
     console.log(`\x1b[32m[ĐỔI TÊN] Đã cập nhật tên đệ tử thành: ${customName || "Đệ tử ngầm (mặc định)"}\x1b[0m`);
+  } else if (cmd === "air" || cmd === "fly" || cmd === "khinhcong") {
+    airWalk = !airWalk;
+    const alt = airWalk ? 3.2 : 0;
+    console.log(`\x1b[36m[KHINH CÔNG] Đã ${airWalk ? "BẬT (bay lượn lơ lửng trên mây)" : "TẮT (tiếp đất bình thường)"} chế độ Đi trên không!\x1b[0m`);
+    disciples.forEach((d) => {
+      if (d.pos) {
+        const baseY = (formationMode === "hall") ? 2.4 : getGroundY(d.pos.x, d.pos.z);
+        d.pos.y = Math.round((baseY + alt) * 100) / 100;
+        d.send({
+          t: "state",
+          x: d.pos.x,
+          y: d.pos.y,
+          z: d.pos.z,
+          ry: d.pos.ry,
+          s: (d.idleTimer && d.idleTimer > 0) ? 0 : 1
+        });
+      }
+    });
   } else if (cmd === "auto") {
     if (autoBowTimer) {
       stopAutoBow();
