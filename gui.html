@@ -649,19 +649,27 @@
 
       <!-- Proxy & Mạng -->
       <div class="card">
-        <div class="card-title">🌐 Mạng & Proxy</div>
+        <div class="card-title">
+          <span>🌐 Mạng & Proxy</span>
+          <span id="txt-proxy-summary" style="font-size:11px; font-weight:normal; color:#38bdf8;">Đang tải...</span>
+        </div>
         <div class="grid-2">
-          <button id="btn-toggle-tor" class="btn-action active" onclick="toggleTor()">
+          <button id="btn-toggle-tor" class="btn-action" onclick="toggleTor()">
             <span class="icon">🧅</span>
-            <span id="txt-tor-action">Tor: BẬT</span>
+            <span id="txt-tor-action">Tor SOCKS5</span>
           </button>
           <button class="btn-action" onclick="triggerAction('freeproxy')">
             <span class="icon">⚡</span>
-            <span>Cào Proxy free</span>
+            <span>Cào Proxy Free</span>
           </button>
         </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <input id="input-proxy" class="input-box" type="text" placeholder="Dán proxy: socks5://ip:port hoặc http://..." onkeydown="if(event.key==='Enter')setCustomProxy()">
+          <button class="btn-small" onclick="setCustomProxy()">Áp dụng</button>
+          <button class="btn-small" style="background:#ef4444; border-color:#ef4444; color:#fff;" onclick="triggerAction('noproxy')" title="Tắt proxy, về kết nối trực tiếp">Tắt</button>
+        </div>
         <div style="font-size:11px; color:#94a3b8; margin-top:8px; line-height:1.4;">
-          💡 <em>Lưu ý: Mạng máy chủ Cloudflare có thể chặn IP Tor (403 Forbidden). Chế độ <b>Trực tiếp</b> hỗ trợ 100 đệ tử mượt mà nhất.</em>
+          💡 <em>Hỗ trợ nạp nhiều proxy trong file <code style="color:#f59e0b;">proxies.txt</code> hoặc dùng Tor Multi-Circuit. Nếu không dùng proxy, hệ thống kết nối trực tiếp siêu tốc!</em>
         </div>
       </div>
 
@@ -706,13 +714,37 @@
       isTor = !!s.tor?.enabled;
       const torBadge = document.getElementById("badge-tor");
       const torVal = document.getElementById("val-tor");
-      if (isTor) {
+
+      const proxySummary = document.getElementById("txt-proxy-summary");
+      if (proxySummary) {
+        if (s.proxy?.count > 0) {
+          proxySummary.innerText = `🛡️ Đang nạp ${s.proxy.count} proxy`;
+          proxySummary.style.color = "#34d399";
+        } else if (isTor) {
+          proxySummary.innerText = `🧅 Tor (Port ${s.tor.port || 9050})`;
+          proxySummary.style.color = "#f59e0b";
+        } else {
+          proxySummary.innerText = "Trực tiếp (Không proxy)";
+          proxySummary.style.color = "#94a3b8";
+        }
+      }
+
+      if (s.proxy?.count > 0) {
         torBadge.className = "badge badge-tor active";
+        torBadge.style.background = "rgba(167, 139, 250, 0.2)";
+        torBadge.style.borderColor = "rgba(167, 139, 250, 0.6)";
+        torVal.innerHTML = `<span style="color:#c084fc">🛡️ ${s.proxy.count} Proxy</span>`;
+      } else if (isTor) {
+        torBadge.className = "badge badge-tor active";
+        torBadge.style.background = "";
+        torBadge.style.borderColor = "";
         torVal.innerText = "Tor: BẬT (Port " + (s.tor?.port || 9050) + ")";
         document.getElementById("txt-tor-action").innerText = "Tor: BẬT";
         document.getElementById("btn-toggle-tor").className = "btn-action active";
       } else {
         torBadge.className = "badge badge-tor inactive";
+        torBadge.style.background = "";
+        torBadge.style.borderColor = "";
         torVal.innerText = "Trực tiếp (0 lag, 100 đệ tử)";
         document.getElementById("txt-tor-action").innerText = "Tor: TẮT";
         document.getElementById("btn-toggle-tor").className = "btn-action";
@@ -867,6 +899,7 @@
               <span>${statusText}</span>
               <span>🙏 ${d.bowCount || 0}</span>
             </div>
+            ${d.proxy ? `<div style="font-size:9px; color:#c084fc; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(d.proxy)}">🛡️ ${escapeHtml(d.proxy.replace(/^socks5:\/\/|^http:\/\//, ''))}</div>` : ''}
           </div>
         `;
       });
@@ -904,6 +937,17 @@
       } catch (err) {
         console.error(err);
       }
+    }
+
+    function setCustomProxy() {
+      const input = document.getElementById("input-proxy");
+      const val = input.value.trim();
+      if (!val) {
+        alert("Vui lòng nhập địa chỉ proxy (VD: socks5://123.45.67.89:1080 hoặc http://user:pass@123.45.67.89:8080)");
+        return;
+      }
+      triggerAction("proxy " + val);
+      input.value = "";
     }
 
     function toggleTor() {

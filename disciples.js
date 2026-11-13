@@ -27,6 +27,8 @@ const net = require("net");
 const tls = require("tls");
 const http = require("http");
 const https = require("https");
+const zlib = require("zlib");
+const os = require("os");
 const fs = require("fs");
 const path = require("path");
 const { spawn, exec } = require("child_process");
@@ -60,6 +62,34 @@ console.error = function(...args) {
 };
 
 /**
+ * Cấu hình TLS Fingerprint mô phỏng Google Chrome (Cipher Suites, Curves, ALPN)
+ * Giúp gói tin bắt tay ClientHello TLS vượt qua các bộ quét JA3/JA4 của Cloudflare WAF.
+ */
+const CHROME_TLS_OPTIONS = {
+  minVersion: "TLSv1.2",
+  maxVersion: "TLSv1.3",
+  ciphers: [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "ECDHE-ECDSA-AES128-GCM-SHA256",
+    "ECDHE-RSA-AES128-GCM-SHA256",
+    "ECDHE-ECDSA-AES256-GCM-SHA384",
+    "ECDHE-RSA-AES256-GCM-SHA384",
+    "ECDHE-ECDSA-CHACHA20-POLY1305",
+    "ECDHE-RSA-CHACHA20-POLY1305",
+    "ECDHE-RSA-AES128-SHA",
+    "ECDHE-RSA-AES256-SHA",
+    "AES128-GCM-SHA256",
+    "AES256-GCM-SHA384",
+    "AES128-SHA",
+    "AES256-SHA"
+  ].join(":"),
+  ecdhCurve: "X25519:P-256:P-384",
+  ALPNProtocols: ["http/1.1"]
+};
+
+/**
  * PureWebSocket: Bộ kết nối WebSocket thuần 100% Node.js chuẩn (Zero NPM Dependency)
  * Hỗ trợ kết nối Trực tiếp (Direct), SOCKS5 (Cloudflare WARP, Tor) và HTTP CONNECT Proxy.
  */
@@ -73,6 +103,7 @@ class PureWebSocket {
     this.url = new URL(url);
     this.options = options;
     this.proxy = options.proxy || null;
+    this.localAddress = options.localAddress || null;
     this.readyState = PureWebSocket.CONNECTING;
     this.onopen = null;
     this.onmessage = null;
@@ -84,6 +115,15 @@ class PureWebSocket {
     this.rawSocket = null;
     this._errorHandled = false;
     this._closeTriggered = false;
+
+    this.inflatorChunks = [];
+    this.inflator = zlib.createInflateRaw();
+    this.inflator.on("data", (chunk) => this.inflatorChunks.push(chunk));
+    this.inflator.on("error", () => {
+      this.inflator = zlib.createInflateRaw();
+      this.inflator.on("data", (chunk) => this.inflatorChunks.push(chunk));
+    });
+
     this._connect();
   }
 
@@ -92,13 +132,19 @@ class PureWebSocket {
     const targetHost = this.url.hostname;
     const targetPort = parseInt(this.url.port, 10) || (isWss ? 443 : 80);
 
+    const netOpts = {
+      host: targetHost,
+      port: targetPort,
+      ...(this.localAddress ? { localAddress: this.localAddress } : {})
+    };
+
     if (this.proxy) {
       this._connectProxy(targetHost, targetPort, isWss);
     } else {
       if (isWss) {
-        this.socket = tls.connect(targetPort, targetHost, { servername: targetHost }, () => this._sendHandshake());
+        this.socket = tls.connect({ ...netOpts, ...CHROME_TLS_OPTIONS, servername: targetHost }, () => this._sendHandshake());
       } else {
-        this.socket = net.connect(targetPort, targetHost, () => this._sendHandshake());
+        this.socket = net.connect(netOpts, () => this._sendHandshake());
       }
       this._bindSocket(this.socket);
     }
@@ -127,7 +173,11 @@ class PureWebSocket {
     const pUser = decodeURIComponent(pUrl.username || "");
     const pPass = decodeURIComponent(pUrl.password || "");
 
-    const raw = net.connect(pPort, pHost);
+    const raw = net.connect({
+      host: pHost,
+      port: pPort,
+      ...(this.localAddress ? { localAddress: this.localAddress } : {})
+    });
     this.rawSocket = raw;
     if (raw.setKeepAlive) raw.setKeepAlive(true, 10000);
     if (raw.setNoDelay) raw.setNoDelay(true);
@@ -218,7 +268,7 @@ class PureWebSocket {
 
   _upgradeToTlsOrHandshake(rawSocket, targetHost, isWss) {
     if (isWss) {
-      this.socket = tls.connect({ socket: rawSocket, servername: targetHost }, () => this._sendHandshake());
+      this.socket = tls.connect({ socket: rawSocket, ...CHROME_TLS_OPTIONS, servername: targetHost }, () => this._sendHandshake());
     } else {
       this.socket = rawSocket;
       this._sendHandshake();
@@ -250,10 +300,8 @@ class PureWebSocket {
       "Sec-WebSocket-Version: 13",
       `Origin: ${origin}`,
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      "Accept-Encoding: gzip, deflate, br, zstd",
+      "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits",
       "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Cache-Control: no-cache",
-      "Pragma: no-cache",
       "\r\n"
     ].join("\r\n");
     if (this.socket && !this.socket.destroyed) {
@@ -337,8 +385,19 @@ class PureWebSocket {
       }
 
       if (opcode === 0x01) {
-        const text = payload.toString("utf8");
-        if (this.onmessage) this.onmessage({ data: text });
+        const isCompressed = (b0 & 0x40) !== 0;
+        if (isCompressed && this.inflator) {
+          this.inflator.write(payload);
+          this.inflator.write(Buffer.from([0x00, 0x00, 0xff, 0xff]));
+          this.inflator.flush(() => {
+            const text = Buffer.concat(this.inflatorChunks).toString("utf8");
+            this.inflatorChunks = [];
+            if (this.onmessage) this.onmessage({ data: text });
+          });
+        } else {
+          const text = payload.toString("utf8");
+          if (this.onmessage) this.onmessage({ data: text });
+        }
       } else if (opcode === 0x09) {
         // WebSocket Ping từ Server: Client BẮT BUỘC phải gửi Pong có MASK theo chuẩn RFC 6455
         const pLen = Math.min(125, payload.length);
@@ -389,6 +448,10 @@ class PureWebSocket {
 
   close() {
     this.readyState = PureWebSocket.CLOSING;
+    if (this.inflator) {
+      try { this.inflator.destroy(); } catch {}
+      this.inflator = null;
+    }
     if (this.rawSocket) {
       try {
         this.rawSocket.removeAllListeners();
@@ -467,6 +530,7 @@ if (proxyFile && fs.existsSync(proxyFile)) {
 }
 let isTorMode = args.includes("--tor");
 let torPort = parseInt(getArg("tor-port", "9050"), 10) || 9050;
+let selected4GAddress = null;
 
 let torChild = null;
 
@@ -509,6 +573,30 @@ function findTorExe() {
   return null;
 }
 
+function downloadAndExtractTor() {
+  return new Promise((resolve) => {
+    console.log("\x1b[33m[TOR] Chưa có Tor, đang tự động tải gói Tor Portable chính chủ (~15MB)...\x1b[0m");
+    const torDir = path.resolve(__dirname, "tor");
+    if (!fs.existsSync(torDir)) {
+      try { fs.mkdirSync(torDir, { recursive: true }); } catch {}
+    }
+    const tarFile = path.resolve(torDir, "tor_bundle.tar.gz");
+    const torUrl = "https://archive.torproject.org/tor-package-archive/torbrowser/14.0.8/tor-expert-bundle-windows-x86_64-14.0.8.tar.gz";
+
+    const cmd = `curl.exe -L "${torUrl}" -o "${tarFile}" && tar.exe -xzf "${tarFile}" -C "${torDir}" && del "${tarFile}"`;
+    exec(cmd, (err) => {
+      const found = findTorExe();
+      if (!err && found) {
+        console.log("\x1b[32m[TOR] Đã tự động tải và giải nén Tor Portable thành công!\x1b[0m");
+        resolve(found);
+      } else {
+        console.warn("\x1b[31m[TOR LỖI] Không tải được Tor tự động, vui lòng kiểm tra kết nối mạng.\x1b[0m");
+        resolve(null);
+      }
+    });
+  });
+}
+
 async function ensureTorReady() {
   // 1. Kiểm tra nếu cổng Tor (9050 hoặc 9150) đã có sẵn
   if (await testPort(9050)) {
@@ -520,10 +608,13 @@ async function ensureTorReady() {
     return 9150;
   }
 
-  // 2. Nếu chưa mở, tìm file tor.exe để khởi động tự động
-  const torExe = findTorExe();
+  // 2. Nếu chưa mở, tìm file tor.exe hoặc tự động tải về nếu chưa có
+  let torExe = findTorExe();
   if (!torExe) {
-    console.warn("\x1b[31m[TOR LỖI] Không tìm thấy file tor.exe! Vui lòng chạy 'cai_dat_tor.bat' để tải Tor tự động.\x1b[0m");
+    torExe = await downloadAndExtractTor();
+  }
+  if (!torExe) {
+    console.warn("\x1b[31m[TOR LỖI] Không tìm thấy file tor.exe!\x1b[0m");
     return 9050;
   }
 
@@ -622,18 +713,27 @@ async function ensureTorReady() {
 }
 
 let autoFreeProxy = args.includes("--free-proxy") || args.includes("--auto-proxy") || args.includes("--free");
+const NO_PROXY_PAUSED = "__NO_PROXY_PAUSED__";
+let isFetchingProxies = false;
+let lastProxyFetchAt = 0;
 
 const failedProxies = new Map();
 function markProxyFailed(proxy, immediate = false) {
-  if (!proxy) return;
+  if (!proxy || proxy === NO_PROXY_PAUSED) return;
   const count = (failedProxies.get(proxy) || 0) + 1;
   failedProxies.set(proxy, count);
-  // Loại bỏ các proxy chết liên tục hoặc bị chặn 403
   if ((immediate || count >= 2) && proxyList.length > 0) {
     const idx = proxyList.indexOf(proxy);
     if (idx !== -1) {
       proxyList.splice(idx, 1);
     }
+  }
+  if (autoFreeProxy && !isTorMode && proxyList.length < 10 && !isFetchingProxies && Date.now() - lastProxyFetchAt > 45000) {
+    fetchFreeProxies().then(() => {
+      disciples.forEach((d) => {
+        if (!d.stopped && !d.connected && !d.isConnecting) d.reconnect();
+      });
+    });
   }
 }
 
@@ -659,20 +759,19 @@ function triggerTorBlockedFallback() {
 
 function getProxyForDisciple(index, attempt = 0) {
   if (isTorMode) {
-    // Tor SOCKS5 Multi-Circuit Isolation (RFC 1928 / RFC 1929)
-    // Phân bổ 100 đệ tử vào pool 20 mạch Tor ổn định (mỗi mạch ~5 đệ tử).
-    // Giữ kết nối siêu mượt, Tor không bị quá tải, mà vẫn đảm bảo 20 IP khác biệt trên toàn thế giới!
-    // Khi thử lại thất bại 3 lần mới chuyển sang nhóm mạch mới (epoch).
     const circuitId = (index - 1) % 20;
     const epoch = Math.floor(attempt / 3);
     return `socks5://d_${circuitId}_${epoch}:torpass@127.0.0.1:${torPort}`;
   }
-  if (!proxyList || proxyList.length === 0) return null;
+  if (!proxyList || proxyList.length === 0) {
+    if (autoFreeProxy) return NO_PROXY_PAUSED;
+    return null;
+  }
   const idx = ((index - 1) + attempt) % proxyList.length;
   return proxyList[idx];
 }
 
-function fetchHttpText(url, timeoutMs = 4000) {
+function fetchHttpText(url, timeoutMs = 4500) {
   return new Promise((resolve) => {
     try {
       const req = https.get(url, (res) => {
@@ -691,28 +790,185 @@ function fetchHttpText(url, timeoutMs = 4000) {
   });
 }
 
-async function fetchFreeProxies() {
-  console.log("\x1b[33m[PROXY] Đang tự động gộp proxy SOCKS5 từ Proxyscrape & GitHub...\x1b[0m");
-  const [t1, t2] = await Promise.all([
-    fetchHttpText("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=2500&country=all"),
-    fetchHttpText("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt")
-  ]);
-  const set = new Set();
-  const addLines = (text) => {
-    if (!text) return;
-    text.split("\n").map((s) => s.trim()).filter((s) => s && s.includes(":") && !s.startsWith("#")).forEach((p) => {
-      set.add(p.startsWith("socks5://") ? p : `socks5://${p}`);
+function probeProxyForTarget(proxyUrl, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URL(proxyUrl);
+    } catch {
+      return resolve(false);
+    }
+    const pHost = parsed.hostname;
+    const pPort = parseInt(parsed.port || (parsed.protocol.startsWith("socks") ? "1080" : "8080"), 10);
+    const isSocks = parsed.protocol.startsWith("socks");
+    const targetHost = "didenchua.online";
+    const targetPort = 443;
+
+    let done = false;
+    let raw = null;
+    let tlsSock = null;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { if (tlsSock) tlsSock.destroy(); } catch {}
+      try { if (raw) raw.destroy(); } catch {}
+      resolve(ok);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    raw = net.connect({ host: pHost, port: pPort });
+    raw.on("error", () => finish(false));
+
+    const testTlsAndHttp = () => {
+      tlsSock = tls.connect({ socket: raw, servername: targetHost, rejectUnauthorized: true }, () => {
+        const key = crypto.randomBytes(16).toString("base64");
+        const wsReq = [
+          `GET /ws HTTP/1.1`,
+          `Host: ${targetHost}`,
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          `Sec-WebSocket-Key: ${key}`,
+          "Sec-WebSocket-Version: 13",
+          `Origin: https://${targetHost}`,
+          "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+          "\r\n"
+        ].join("\r\n");
+        tlsSock.write(wsReq);
+      });
+      tlsSock.on("error", () => finish(false));
+      tlsSock.once("data", (chunk) => {
+        const firstLine = chunk.toString("utf8", 0, 64).split("\r\n")[0] || "";
+        // Chỉ nhận proxy thực sự mở được WebSocket 101 Switching Protocols
+        finish(firstLine.includes("101"));
+      });
+    };
+
+    raw.on("connect", () => {
+      if (isSocks) {
+        raw.write(Buffer.from([0x05, 0x01, 0x00]));
+        raw.once("data", (authResp) => {
+          if (authResp[0] !== 0x05 || authResp[1] !== 0x00) return finish(false);
+          const hostBuf = Buffer.from(targetHost);
+          const portBuf = Buffer.alloc(2);
+          portBuf.writeUInt16BE(targetPort, 0);
+          raw.write(Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]), hostBuf, portBuf]));
+          raw.once("data", (connResp) => {
+            if (connResp[1] !== 0x00) return finish(false);
+            testTlsAndHttp();
+          });
+        });
+      } else {
+        raw.write(`CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\nProxy-Connection: Keep-Alive\r\n\r\n`);
+        raw.once("data", (resp) => {
+          if (!resp.toString("utf8").includes(" 200 ")) return finish(false);
+          testTlsAndHttp();
+        });
+      }
     });
-  };
-  addLines(t1);
-  addLines(t2);
-  if (set.size > 0) {
-    proxyList = Array.from(set);
-    console.log(`\x1b[32m[PROXY] Đã gộp thành công ${proxyList.length} Proxy SOCKS5 sẵn sàng sử dụng!\x1b[0m`);
-  } else {
-    console.log("\x1b[31m[PROXY] Không lấy được proxy tự động, sẽ thử kết nối trực tiếp.\x1b[0m");
+  });
+}
+
+async function fetchFreeProxies() {
+  if (isFetchingProxies) return proxyList;
+  isFetchingProxies = true;
+  lastProxyFetchAt = Date.now();
+  try {
+    console.log("\x1b[33m[PROXY] Đang quét đa nguồn GitHub & API (hơn 10 kho proxy lớn)...\x1b[0m");
+    const [
+      vnSocks, vnHttp, vnProxifly,
+      pfSocks, pfHttp,
+      psAll, monoSocks, sxSocks,
+      databaySocks, databayHttp,
+      hookzofSocks, r00teeSocks,
+      komutanSocks, tuanminAll,
+      iplocateSocks, iplocateHttp
+    ] = await Promise.all([
+      fetchHttpText("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=3000&country=VN"),
+      fetchHttpText("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=3000&country=VN"),
+      fetchHttpText("https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/countries/VN/data.txt"),
+      fetchHttpText("https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"),
+      fetchHttpText("https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt"),
+      fetchHttpText("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=2000&country=all"),
+      fetchHttpText("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/r00tee/Proxy-List/main/Socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/tuanminpay/live-proxy/master/all.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/socks5.txt"),
+      fetchHttpText("https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt")
+    ]);
+
+    const seen = new Set();
+    const subnetCount = new Map();
+    const candidates = [];
+
+    const addSource = (text, defaultProto, capPerSubnet = 3) => {
+      if (!text) return;
+      for (const rawLine of text.split("\n")) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#") || !line.includes(":")) continue;
+        const normalized = /^(socks5?|https?):\/\//i.test(line) ? line : `${defaultProto}://${line}`;
+        if (seen.has(normalized) || failedProxies.has(normalized)) continue;
+        const hostPart = normalized.replace(/^[a-z0-9]+:\/\//i, "").split(":")[0];
+        const parts = hostPart.split(".");
+        if (parts.length === 4) {
+          const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
+          const cnt = subnetCount.get(subnet) || 0;
+          if (cnt >= capPerSubnet) continue;
+          subnetCount.set(subnet, cnt + 1);
+        }
+        seen.add(normalized);
+        candidates.push(normalized);
+      }
+    };
+
+    // Ưu tiên các nguồn Việt Nam
+    addSource(vnSocks, "socks5", 15);
+    addSource(vnHttp, "http", 15);
+    addSource(vnProxifly, "http", 15);
+    // Các kho tổng hợp lớn toàn cầu
+    addSource(databaySocks, "socks5", 3);
+    addSource(databayHttp, "http", 3);
+    addSource(hookzofSocks, "socks5", 3);
+    addSource(r00teeSocks, "socks5", 3);
+    addSource(komutanSocks, "socks5", 3);
+    addSource(tuanminAll, "http", 2);
+    addSource(pfSocks, "socks5", 3);
+    addSource(pfHttp, "http", 3);
+    addSource(iplocateSocks, "socks5", 3);
+    addSource(iplocateHttp, "http", 3);
+    addSource(psAll, "socks5", 3);
+    addSource(monoSocks, "socks5", 3);
+    addSource(sxSocks, "socks5", 2);
+
+    const maxToProbe = Math.min(candidates.length, 600);
+    const working = [];
+    const batchSize = 60;
+    for (let i = 0; i < maxToProbe && working.length < 80; i += batchSize) {
+      const batch = candidates.slice(i, i + batchSize);
+      const results = await Promise.all(batch.map(async (p) => ((await probeProxyForTarget(p, 2500)) ? p : null)));
+      for (const ok of results) {
+        if (ok) working.push(ok);
+      }
+    }
+
+    if (working.length > 0) {
+      proxyList = working;
+      console.log(`\x1b[32m[PROXY] Đã lọc được ${proxyList.length} Proxy sống vượt qua TLS/Cloudflare (từ ${candidates.length} nguồn)!\x1b[0m`);
+    } else {
+      proxyList = [];
+      console.log(`\x1b[31m[PROXY] Không tìm thấy Proxy miễn phí nào kết nối được tới didenchua.online (đã thử ${maxToProbe} proxy).\x1b[0m`);
+      console.log("\x1b[33m👉 Để bảo vệ Acc chính không bị cảnh báo nhiều tài khoản, tạm dừng kết nối trực tiếp. Hãy nạp proxy VN sạch vào proxies.txt hoặc chạy <= 4 đệ tử trực tiếp.\x1b[0m");
+    }
+    return proxyList;
+  } finally {
+    isFetchingProxies = false;
   }
-  return proxyList;
 }
 
 // Tùy chọn trang phục, màu áo, pháp khí, tràng hạt, bồ đoàn ngẫu nhiên
@@ -879,16 +1135,26 @@ class Disciple {
       this.ws = null;
     }
 
-    this.isConnecting = true;
     const proxy = getProxyForDisciple(this.index, this.proxyAttempt);
+    if (proxy === NO_PROXY_PAUSED) {
+      this.isConnecting = false;
+      this.currentProxy = null;
+      return;
+    }
+    this.isConnecting = true;
     this.currentProxy = proxy;
     try {
+      const connectOpts = {};
+      if (proxy) connectOpts.proxy = proxy;
+      if (selected4GAddress) connectOpts.localAddress = selected4GAddress;
+
       if (proxy) {
         this.log(`Đang kết nối qua Proxy: ${proxy}...`, "\x1b[35m");
-        this.ws = new PureWebSocket(SERVER_URL, { proxy });
-      } else {
-        this.ws = new PureWebSocket(SERVER_URL);
+      } else if (selected4GAddress && this.index === 1 && !Disciple._logged4G) {
+        Disciple._logged4G = true;
+        this.log(`Đang kết nối qua mạng 4G (${selected4GAddress})...`, "\x1b[32m");
       }
+      this.ws = new PureWebSocket(SERVER_URL, connectOpts);
     } catch (err) {
       this.isConnecting = false;
       this.log(`Lỗi tạo kết nối: ${err.message}`, "\x1b[31m");
@@ -940,14 +1206,23 @@ class Disciple {
         } else if (msg.t === "busy") {
           this.log(`Máy chủ báo bận / giới hạn IP (Rate Limit). Đang chuyển proxy khác...`, "\x1b[33m");
           if (this.currentProxy) {
-            markProxyFailed(this.currentProxy);
-          } else if (proxyList.length === 0) {
-            fetchFreeProxies().then(() => {
-              this.reconnect();
-            });
-            return;
+            markProxyFailed(this.currentProxy, true);
+            this.currentProxy = null;
+            this.scheduleReconnect(true);
+          } else {
+            this.scheduleReconnect();
           }
-          this.scheduleReconnect();
+          return;
+        } else if (msg.t === "abroad") {
+          this.log(`Proxy bị từ chối do IP nước ngoài (abroad). Đang đổi proxy khác...`, "\x1b[33m");
+          if (this.currentProxy) {
+            markProxyFailed(this.currentProxy, true);
+            this.currentProxy = null;
+            this.scheduleReconnect(true);
+          } else {
+            this.scheduleReconnect();
+          }
+          return;
         } else if (msg.t === "room") {
           this.room = msg.room;
           if (Array.isArray(msg.peers)) msg.peers.forEach(registerOrUpdatePeer);
@@ -1004,12 +1279,11 @@ class Disciple {
       this.isConnecting = false;
       const errMsg = err?.message || "Lỗi mạng";
       this.log(`Lỗi kết nối: ${errMsg}`, "\x1b[31m");
-      if (errMsg.includes("403 Forbidden") || errMsg.includes("403")) {
-        if (isTorMode) {
-          triggerTorBlockedFallback();
-        } else if (this.currentProxy) {
-          markProxyFailed(this.currentProxy, true);
-        }
+      if ((errMsg.includes("403 Forbidden") || errMsg.includes("403")) && isTorMode) {
+        triggerTorBlockedFallback();
+      } else if (this.currentProxy && !isTorMode) {
+        markProxyFailed(this.currentProxy, true);
+        this.currentProxy = null;
       }
     };
   }
@@ -1095,23 +1369,25 @@ class Disciple {
     }
   }
 
-  scheduleReconnect() {
+  scheduleReconnect(fastProxySwitch = false) {
     if (this.stopped) return;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     if (this.currentProxy) {
-      markProxyFailed(this.currentProxy);
+      markProxyFailed(this.currentProxy, fastProxySwitch);
+      this.currentProxy = null;
     }
     this.proxyAttempt++;
 
-    // Backoff thông minh với jitter và phân tán stagger theo số thứ tự đệ tử
-    // Tránh tình trạng bão kết nối (reconnect storm) cùng lúc gây sập cổng Tor
-    const baseBackoff = Math.min(25000, 3500 + (this.proxyAttempt * 1500));
-    const jitter = Math.floor(Math.random() * 1500);
-    const stagger = ((this.index - 1) % 20) * 300;
-    const delay = baseBackoff + jitter + stagger;
+    if (getProxyForDisciple(this.index, this.proxyAttempt) === NO_PROXY_PAUSED) {
+      return;
+    }
+
+    const delay = (fastProxySwitch || proxyList.length > 0)
+      ? 400 + Math.floor(Math.random() * 500)
+      : Math.min(25000, 3500 + (this.proxyAttempt * 1500)) + Math.floor(Math.random() * 1500) + ((this.index - 1) % 20) * 300;
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -1747,7 +2023,7 @@ function printHeader() {
   } else if (proxyList.length > 1) {
     proxyStatus = `XOAY VÒNG (${proxyList.length} proxy)`;
   }
-  console.log(`\x1b[32m▶ Proxy / VPN    :\x1b[0m ${proxyStatus}`);
+  console.log(`\x1b[32m▶ Proxy / Mạng   :\x1b[0m ${proxyStatus}`);
   if (isGuiMode) {
     console.log(`\x1b[35m▶ Giao diện GUI  :\x1b[0m Đang chạy tại http://127.0.0.1:4567 (Đã mở cửa sổ ứng dụng)`);
   }
@@ -1783,8 +2059,7 @@ function printHeader() {
 async function startAll() {
   if (isTorMode) {
     torPort = await ensureTorReady();
-  } else if ((autoFreeProxy || targetCount > 10) && proxyList.length === 0) {
-    console.log("\x1b[33m[PROXY] Số lượng đệ tử lớn (>10), tự động nạp kho Proxy SOCKS5 sống để vượt giới hạn IP máy chủ...\x1b[0m");
+  } else if (autoFreeProxy && proxyList.length === 0) {
     await fetchFreeProxies();
   }
   printHeader();
@@ -1975,6 +2250,27 @@ async function handleCommand(line) {
   } else if (cmd === "tagname" || cmd === "kemten" || cmd === "greetname") {
     greetIncludeName = !greetIncludeName;
     console.log(`\x1b[35m[KÈM TÊN CHAT] Đã ${greetIncludeName ? "BẬT (kèm tên người theo dõi)" : "TẮT (chỉ chat nội dung bạn nhập)"}!\x1b[0m`);
+  } else if (cmd === "4g" || cmd === "wifi" || cmd === "toggle4g") {
+    if (selected4GAddress) {
+      selected4GAddress = null;
+      use4GMode = false;
+      console.log(`\x1b[33m[MẠNG ĐỆ TỬ] Đã chuyển sang MẠNG MẶC ĐỊNH (Chung đường LAN với Acc chính).\x1b[0m`);
+    } else {
+      const dt = detect4GLocalAddress();
+      if (dt) {
+        selected4GAddress = dt.address;
+        use4GMode = true;
+        console.log(`\x1b[32m[MẠNG ĐỆ TỬ] Đã kích hoạt MẠNG 4G (${dt.address})! Đệ tử chạy riêng 4G, Acc chính an toàn trên LAN.\x1b[0m`);
+      } else {
+        console.log(`\x1b[31m[MẠNG ĐỆ TỬ] Không tìm thấy card Wi-Fi/4G. Vui lòng kết nối Wi-Fi phát từ điện thoại.\x1b[0m`);
+      }
+    }
+    disciples.forEach((d) => d.reconnect());
+  } else if (cmd === "lan") {
+    selected4GAddress = null;
+    use4GMode = false;
+    console.log(`\x1b[33m[MẠNG ĐỆ TỬ] Đã chuyển sang MẠNG LAN mặc định.\x1b[0m`);
+    disciples.forEach((d) => d.reconnect());
   } else if (cmd === "tor") {
     isTorMode = !isTorMode;
     if (isTorMode) {
@@ -2126,6 +2422,12 @@ function startGuiServer(preferredPort = 4567) {
           enabled: isTorMode,
           port: torPort
         },
+        proxy: {
+          count: proxyList.length,
+          list: proxyList.slice(0, 10),
+          autoFree: autoFreeProxy,
+          current: proxyList[0] || null
+        },
         counts: {
           total: disciples.length,
           ready: disciples.filter((d) => d.ready).length,
@@ -2158,7 +2460,8 @@ function startGuiServer(preferredPort = 4567) {
           ready: d.ready,
           connected: d.connected,
           bowCount: d.bowCount,
-          id: d.myId
+          id: d.myId,
+          proxy: d.currentProxy || null
         }))
       };
 

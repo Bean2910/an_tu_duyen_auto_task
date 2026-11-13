@@ -27,8 +27,8 @@ Máy chủ game `didenchua.online` được bảo vệ bởi **Cloudflare WAF**:
 
 ## 🌟 CÁCH DÙNG MỚI (KHUYÊN DÙNG): BẢNG ĐIỀU KHIỂN GUI ĐỒ HỌA TRỰC QUAN
 
-Nếu bạn không muốn gõ lệnh trong màn hình đen Terminal, bạn chỉ cần nhấp đúp chuột vào:
-👉 [`chay_gui.bat`](file:///d:/Code/an_tu_duyen_auto_task/chay_gui.bat)
+Nếu bạn không muốn gõ lệnh trong màn hình đen Terminal, bạn chỉ cần nhấp đúp chuột vào file duy nhất:
+👉 [`chay_gui.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_gui.bat)
 
 Hệ thống sẽ tự động bật một **cửa sổ ứng dụng Desktop (App Mode)** cực đẹp với đầy đủ các nút bấm:
 - **Nút "Lạy Phật" to tướng**: Nhấp chuột hoặc bấm phím `Space` là 100 đệ tử lạy ngay.
@@ -70,7 +70,7 @@ Nếu bạn có sẵn Proxy hoặc mua Proxy giá rẻ tại Việt Nam (như `p
      http://user123:pass456@103.1.2.3:8080
      103.4.5.6:1080
      ```
-  3. Mở [`chay_de_tu.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_de_tu.bat) chọn `[3]` hoặc nhấp đúp [`chay_nhanh_100_de_tu.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_nhanh_100_de_tu.bat). Hệ thống sẽ tự động đọc file và chia đều 100 đệ tử qua danh sách proxy!
+  3. Mở [`chay_gui.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_gui.bat), hệ thống sẽ tự động đọc file và chia đều các đệ tử qua danh sách proxy!
 
 ---
 
@@ -79,7 +79,7 @@ Nếu bạn có sẵn Proxy hoặc mua Proxy giá rẻ tại Việt Nam (như `p
 Nếu không cài Tor và không mua proxy:
 - `disciples.js` được nâng cấp bộ thu thập tự động kết hợp từ **Proxyscrape API** và **kho SOCKS5 đồ sộ trên GitHub (TheSpeedX)** với hơn **3.000+ Proxy sống**.
 - **Cơ chế tự hồi phục thông minh (`markProxyFailed`):** Khi một proxy bị đứt gánh giữa đường, hệ thống sẽ tự động gạch tên proxy đó, bốc một proxy mới từ kho 3.000+ proxy và cho đệ tử kết nối lại ngay lập tức sau 2.5 giây.
-- **Cách chạy:** Nhấp đúp vào [`chay_nhanh_100_de_tu.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_nhanh_100_de_tu.bat) hoặc chọn `[1]` trong [`chay_de_tu.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_de_tu.bat).
+- **Cách chạy:** Nhấp đúp vào [`chay_gui.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_gui.bat) và bấm nút **"Cào Proxy Free"** ngay trên giao diện Web GUI.
 
 ---
 
@@ -138,7 +138,7 @@ Khi cửa sổ Terminal đang chạy, bạn có thể gõ các lệnh sau và nh
 - **Khi sao chép sang máy tính khác:**
   - Bạn chỉ cần copy cả thư mục project sang máy mới.
   - Cài Node.js (nếu máy mới chưa có) tại [nodejs.org](https://nodejs.org/).
-  - Chạy file [`cai_dat_tor.bat`](file:///d:/python/an_tu_duyen_auto_task/cai_dat_tor.bat) một lần duy nhất, sau đó nhấp đúp [`chay_100_de_tu_tor.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_100_de_tu_tor.bat) là xong! Không cần gõ bất kỳ dòng lệnh nào trong terminal.
+  - Chỉ cần nhấp đúp file [`chay_gui.bat`](file:///d:/python/an_tu_duyen_auto_task/chay_gui.bat) là xong! Không cần gõ bất kỳ dòng lệnh nào trong terminal.
 - **Treo máy 24/7:**
   - File `disciples.js` tiêu thụ chưa đến 15MB RAM và 0% GPU, bạn có thể cắm máy cả ngày lẫn đêm mà quạt máy tính không hề rú rít hay nóng máy.
 - **Khi muốn đổi người bám theo:**
